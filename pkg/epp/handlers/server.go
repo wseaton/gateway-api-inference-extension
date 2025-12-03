@@ -81,6 +81,7 @@ type RequestContext struct {
 	IncomingModelName         string
 	TargetModelName           string
 	FairnessID                string
+	Priority                  int
 	ObjectiveKey              string
 	RequestReceivedTimestamp  time.Time
 	ResponseCompleteTimestamp time.Time

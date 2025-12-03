@@ -24,30 +24,45 @@ import (
 
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/framework"
 	frameworkmocks "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/framework/mocks"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/framework/plugins/policies/interflow/dispatch"
 	_ "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/framework/plugins/policies/interflow/dispatch/besthead"
 	_ "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/framework/plugins/policies/interflow/dispatch/roundrobin"
+	_ "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/framework/plugins/policies/interflow/dispatch/vtc"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/types"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 )
+
+// interFlowDispatchPolicies lists the policies to test for conformance.
+// these are registered via init() in their respective packages.
+var interFlowDispatchPolicies = []string{
+	"BestHead",
+	"RoundRobin",
+	"VTC",
+}
 
 // TestInterFlowDispatchPolicy_Conformance is the main conformance test suite for `framework.InterFlowDispatchPolicy`
 // implementations.
-// It iterates over all policy implementations registered via `dispatch.MustRegisterPolicy` and runs a series of
+// It iterates over all policy implementations registered via plugins.Register and runs a series of
 // sub-tests to ensure they adhere to the `framework.InterFlowDispatchPolicy` contract.
 func TestInterFlowDispatchPolicyConformance(t *testing.T) {
 	t.Parallel()
 
-	for policyName, constructor := range dispatch.RegisteredPolicies {
-		t.Run(string(policyName), func(t *testing.T) {
+	for _, policyName := range interFlowDispatchPolicies {
+		t.Run(policyName, func(t *testing.T) {
 			t.Parallel()
 
-			policy, err := constructor()
-			require.NoError(t, err, "Policy constructor for %s failed", policyName)
-			require.NotNil(t, policy, "Constructor for %s should return a non-nil policy instance", policyName)
+			factory, ok := plugins.Registry[policyName]
+			require.True(t, ok, "Policy %s not found in plugins.Registry", policyName)
+
+			pluginInstance, err := factory(policyName, nil, nil)
+			require.NoError(t, err, "Policy factory for %s failed", policyName)
+			require.NotNil(t, pluginInstance, "Factory for %s should return a non-nil policy instance", policyName)
+
+			policy, ok := pluginInstance.(framework.InterFlowDispatchPolicy)
+			require.True(t, ok, "Plugin %s is not an InterFlowDispatchPolicy", policyName)
 
 			t.Run("Initialization", func(t *testing.T) {
 				t.Parallel()
-				assert.NotEmpty(t, policy.Name(), "Name() for %s should return a non-empty string", policyName)
+				assert.NotEmpty(t, policy.TypedName().Name, "Name() for %s should return a non-empty string", policyName)
 			})
 
 			t.Run("SelectQueue", func(t *testing.T) {
@@ -124,20 +139,20 @@ func runSelectQueueConformanceTests(t *testing.T, policy framework.InterFlowDisp
 			selectedQueue, err := policy.SelectQueue(tc.band)
 
 			if tc.expectErr {
-				require.Error(t, err, "SelectQueue for policy %s should return an error", policy.Name())
+				require.Error(t, err, "SelectQueue for policy %s should return an error", policy.TypedName().Name)
 			} else {
-				require.NoError(t, err, "SelectQueue for policy %s should not return an error", policy.Name())
+				require.NoError(t, err, "SelectQueue for policy %s should not return an error", policy.TypedName().Name)
 			}
 
 			if tc.expectNil {
-				assert.Nil(t, selectedQueue, "SelectQueue for policy %s should return a nil queue", policy.Name())
+				assert.Nil(t, selectedQueue, "SelectQueue for policy %s should return a nil queue", policy.TypedName().Name)
 			} else {
-				assert.NotNil(t, selectedQueue, "SelectQueue for policy %s should not return a nil queue", policy.Name())
+				assert.NotNil(t, selectedQueue, "SelectQueue for policy %s should not return a nil queue", policy.TypedName().Name)
 			}
 
 			if tc.expectedQueue != nil {
 				assert.Equal(t, tc.expectedQueue.FlowKey(), selectedQueue.FlowKey(),
-					"SelectQueue for policy %s returned an unexpected queue", policy.Name())
+					"SelectQueue for policy %s returned an unexpected queue", policy.TypedName().Name)
 			}
 		})
 	}

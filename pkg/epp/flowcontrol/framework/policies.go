@@ -16,7 +16,14 @@ limitations under the License.
 
 package framework
 
-import "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/types"
+import (
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/types"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
+)
+
+const (
+	InterFlowDispatchPolicyType = "InterFlowDispatchPolicy"
+)
 
 // PriorityScoreType is a descriptor for the domain of a policy's item comparator.
 type PriorityScoreType string
@@ -123,8 +130,7 @@ type IntraFlowDispatchPolicy interface {
 // Implementations define the fairness or dispatch ordering logic between different flows that share the same priority
 // level.
 type InterFlowDispatchPolicy interface {
-	// Name returns a string identifier for the concrete policy implementation type (e.g., "RoundRobin").
-	Name() string
+	plugins.Plugin
 
 	// SelectQueue inspects the flow queues within the provided `PriorityBandAccessor` and returns the `FlowQueueAccessor`
 	// of the queue chosen for the next dispatch attempt.
@@ -139,6 +145,20 @@ type InterFlowDispatchPolicy interface {
 	//
 	// Conformance: Implementations MUST be goroutine-safe if they maintain internal state.
 	SelectQueue(band PriorityBandAccessor) (selectedQueue FlowQueueAccessor, err error)
+}
+
+// RequestCompletionListener is an optional interface that dispatch policies can implement to receive
+// notifications when requests complete. This allows policies to update internal state based on actual
+// resource consumption (e.g., token counts).
+//
+// Policies that implement this interface should register themselves via the flow control framework.
+// The framework will invoke OnRequestComplete for each completed request.
+type RequestCompletionListener interface {
+	// OnRequestComplete is called when a request completes successfully.
+	// flowID identifies the flow that serviced the request.
+	// inputTokens is the number of input tokens consumed.
+	// outputTokens is the number of output tokens generated.
+	OnRequestComplete(flowID string, priority int, inputTokens int, outputTokens int)
 }
 
 // FlowQueueAccessor provides a policy-facing, read-only view of a single flow's queue.

@@ -150,6 +150,10 @@ func (fcac *FlowControlAdmissionController) Admit(
 	logger := log.FromContext(ctx)
 	logger.V(logutil.TRACE).Info("Executing FlowControlAdmissionController",
 		"requestID", reqCtx.SchedulingRequest.RequestId, "priority", priority, "fairnessID", reqCtx.FairnessID)
+
+	// store priority in request context for later use (e.g., in ResponseComplete plugins)
+	reqCtx.Priority = priority
+
 	if err := rejectIfSheddableAndSaturated(ctx, fcac.saturationDetector, reqCtx, candidatePods, priority); err != nil {
 		return err
 	}

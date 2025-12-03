@@ -36,15 +36,25 @@ var (
 	flow3Key = types.FlowKey{ID: "flow3", Priority: 0}
 )
 
-func TestRoundRobin_Name(t *testing.T) {
+// newTestPolicy creates a new RoundRobin policy for testing using the factory function.
+func newTestPolicy(t *testing.T) *roundRobin {
+	t.Helper()
+	plugin, err := newRoundRobinFactory(RoundRobinPolicyName, nil, nil)
+	require.NoError(t, err, "Factory should not return an error")
+	policy, ok := plugin.(*roundRobin)
+	require.True(t, ok, "Plugin should be of type *roundRobin")
+	return policy
+}
+
+func TestRoundRobin_TypedName(t *testing.T) {
 	t.Parallel()
-	policy := newRoundRobin()
-	assert.Equal(t, RoundRobinPolicyName, policy.Name(), "Name should match the policy's constant")
+	policy := newTestPolicy(t)
+	assert.Equal(t, RoundRobinPolicyName, policy.TypedName().Name, "Name should match the policy's constant")
 }
 
 func TestRoundRobin_SelectQueue_Logic(t *testing.T) {
 	t.Parallel()
-	policy := newRoundRobin()
+	policy := newTestPolicy(t)
 
 	// Setup: Three non-empty queues
 	queue1 := &frameworkmocks.MockFlowQueueAccessor{LenV: 1, FlowKeyV: flow1Key}
@@ -90,7 +100,7 @@ func TestRoundRobin_SelectQueue_Logic(t *testing.T) {
 
 func TestRoundRobin_SelectQueue_SkipsEmptyQueues(t *testing.T) {
 	t.Parallel()
-	policy := newRoundRobin()
+	policy := newTestPolicy(t)
 
 	// Setup: Two non-empty queues and one empty queue
 	flowEmptyKey := types.FlowKey{ID: "flowEmpty", Priority: 0}
@@ -132,7 +142,7 @@ func TestRoundRobin_SelectQueue_SkipsEmptyQueues(t *testing.T) {
 
 func TestRoundRobin_SelectQueue_HandlesDynamicFlows(t *testing.T) {
 	t.Parallel()
-	policy := newRoundRobin()
+	policy := newTestPolicy(t)
 
 	// Initial setup
 	queue1 := &frameworkmocks.MockFlowQueueAccessor{LenV: 1, FlowKeyV: flow1Key}
@@ -196,7 +206,7 @@ func TestRoundRobin_SelectQueue_Concurrency(t *testing.T) {
 	for i := range 5 {
 		t.Run(fmt.Sprintf("Iteration%d", i), func(t *testing.T) {
 			t.Parallel()
-			policy := newRoundRobin()
+			policy := newTestPolicy(t)
 
 			// Setup: Three non-empty queues
 			queues := []*frameworkmocks.MockFlowQueueAccessor{

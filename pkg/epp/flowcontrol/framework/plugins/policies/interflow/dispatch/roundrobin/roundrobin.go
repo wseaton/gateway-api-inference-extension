@@ -19,38 +19,39 @@ limitations under the License.
 package roundrobin
 
 import (
+	"encoding/json"
 	"slices"
 	"sync"
 
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/framework"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/framework/plugins/policies/interflow/dispatch"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/types"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 )
 
 // RoundRobinPolicyName is the name of the Round Robin policy implementation.
 const RoundRobinPolicyName = "RoundRobin"
 
 func init() {
-	dispatch.MustRegisterPolicy(dispatch.RegisteredPolicyName(RoundRobinPolicyName),
-		func() (framework.InterFlowDispatchPolicy, error) {
-			return newRoundRobin(), nil
-		})
+	plugins.Register(RoundRobinPolicyName, newRoundRobinFactory)
+}
+
+// newRoundRobinFactory is the factory function for the RoundRobin policy.
+func newRoundRobinFactory(name string, _ json.RawMessage, _ plugins.Handle) (plugins.Plugin, error) {
+	return &roundRobin{
+		typedName: plugins.TypedName{Type: framework.InterFlowDispatchPolicyType, Name: name},
+		iterator:  newIterator(),
+	}, nil
 }
 
 // roundRobin implements the `framework.InterFlowDispatchPolicy` interface using a round-robin strategy.
 type roundRobin struct {
-	iterator *iterator
+	typedName plugins.TypedName
+	iterator  *iterator
 }
 
-func newRoundRobin() framework.InterFlowDispatchPolicy {
-	return &roundRobin{
-		iterator: newIterator(),
-	}
-}
-
-// Name returns the name of the policy.
-func (p *roundRobin) Name() string {
-	return RoundRobinPolicyName
+// TypedName returns the type and name of the plugin instance.
+func (p *roundRobin) TypedName() plugins.TypedName {
+	return p.typedName
 }
 
 // SelectQueue selects the next flow queue in a round-robin fashion from the given priority band.

@@ -19,6 +19,7 @@ package mocks
 import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/framework"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/types"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 )
 
 // MockItemComparator is a simple stub mock for the `framework.ItemComparator` interface.
@@ -193,8 +194,8 @@ type MockInterFlowDispatchPolicy struct {
 	SelectQueueFunc func(band framework.PriorityBandAccessor) (framework.FlowQueueAccessor, error)
 }
 
-func (m *MockInterFlowDispatchPolicy) Name() string {
-	return m.NameV
+func (m *MockInterFlowDispatchPolicy) TypedName() plugins.TypedName {
+	return plugins.TypedName{Type: framework.InterFlowDispatchPolicyType, Name: m.NameV}
 }
 
 func (m *MockInterFlowDispatchPolicy) SelectQueue(band framework.PriorityBandAccessor) (framework.FlowQueueAccessor, error) {

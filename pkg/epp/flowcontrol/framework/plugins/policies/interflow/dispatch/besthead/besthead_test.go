@@ -30,6 +30,16 @@ import (
 	typesmocks "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/types/mocks"
 )
 
+// newTestPolicy creates a new BestHead policy for testing using the factory function.
+func newTestPolicy(t *testing.T) *bestHead {
+	t.Helper()
+	plugin, err := newBestHeadFactory(BestHeadPolicyName, nil, nil)
+	require.NoError(t, err, "Factory should not return an error")
+	policy, ok := plugin.(*bestHead)
+	require.True(t, ok, "Plugin should be of type *bestHead")
+	return policy
+}
+
 const (
 	flow1ID         = "flow1"
 	flow2ID         = "flow2"
@@ -76,15 +86,15 @@ func newTestBand(queues ...framework.FlowQueueAccessor) *frameworkmocks.MockPrio
 	}
 }
 
-func TestBestHead_Name(t *testing.T) {
+func TestBestHead_TypedName(t *testing.T) {
 	t.Parallel()
-	policy := newBestHead()
-	assert.Equal(t, BestHeadPolicyName, policy.Name(), "Name should match the policy's constant")
+	policy := newTestPolicy(t)
+	assert.Equal(t, BestHeadPolicyName, policy.TypedName().Name, "Name should match the policy's constant")
 }
 
 func TestBestHead_SelectQueue(t *testing.T) {
 	t.Parallel()
-	policy := newBestHead()
+	policy := newTestPolicy(t)
 	now := time.Now()
 
 	itemBetter := typesmocks.NewMockQueueItemAccessor(10, "itemBetter", flow1Key)

@@ -16,6 +16,8 @@ limitations under the License.
 
 package requestcontrol
 
+import "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/handlers"
+
 // Response contains information from the response received to be passed to the Response requestcontrol plugins
 type Response struct {
 	// RequestId is the Envoy generated Id for the request being processed
@@ -28,4 +30,10 @@ type Response struct {
 	IsStreaming bool
 	// EndOfStream when true indicates that this invocation contains the last chunk of the response
 	EndOfStream bool
+	// Usage contains the token usage information from the LLM response
+	Usage *handlers.Usage
+	// FairnessID is the flow identifier for fairness/flow control
+	FairnessID string
+	// Priority is the priority level for this request
+	Priority int
 }

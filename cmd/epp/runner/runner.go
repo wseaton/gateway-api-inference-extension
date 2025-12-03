@@ -86,7 +86,7 @@ var flowControlConfig = flowcontrol.Config{
 		// Define domain of accepted priority levels as this field is required. Use defaults for all optional fields.
 		// TODO: this should not be hardcoded.
 		PriorityBands: []fcregistry.PriorityBandConfig{
-			{Priority: 0, PriorityName: "Default"},
+			{Priority: 0, PriorityName: "Default", InterFlowDispatchPolicy: "VTC"},
 		},
 	},
 }
@@ -327,10 +327,14 @@ func (r *Runner) Run(ctx context.Context) error {
 			return fmt.Errorf("invalid Flow Control config: %w", err)
 		}
 
-		registry, err := fcregistry.NewFlowRegistry(fcCfg.Registry, setupLog)
+		// create a handle for flow control plugins (separate from scheduling plugins)
+		fcHandle := plugins.NewEppHandle(ctx, datastore.PodList)
+
+		registry, err := fcregistry.NewFlowRegistry(fcCfg.Registry, setupLog, fcHandle)
 		if err != nil {
 			return fmt.Errorf("failed to initialize Flow Registry: %w", err)
 		}
+
 		fc, err := fccontroller.NewFlowController(
 			ctx,
 			fcCfg.Controller,

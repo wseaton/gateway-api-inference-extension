@@ -275,6 +275,43 @@ var (
 		},
 		[]string{"fairness_id", "priority"},
 	)
+
+	// VTC (Virtual Token Counter) Policy Metrics
+	vtcVirtualCounter = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Subsystem: InferenceExtension,
+			Name:      "vtc_virtual_counter",
+			Help:      metricsutil.HelpMsgWithStability("Current virtual token counter value per flow.", compbasemetrics.ALPHA),
+		},
+		[]string{"flow_id"},
+	)
+
+	vtcQueueSelections = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Subsystem: InferenceExtension,
+			Name:      "vtc_queue_selections_total",
+			Help:      metricsutil.HelpMsgWithStability("Number of times each flow was selected for dispatch by VTC policy.", compbasemetrics.ALPHA),
+		},
+		[]string{"flow_id"},
+	)
+
+	vtcCounterUpdates = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Subsystem: InferenceExtension,
+			Name:      "vtc_counter_update_tokens",
+			Help:      metricsutil.HelpMsgWithStability("Distribution of token service amounts charged per request by VTC policy.", compbasemetrics.ALPHA),
+			Buckets:   []float64{10, 50, 100, 200, 500, 1000, 2000, 5000, 10000},
+		},
+		[]string{"flow_id"},
+	)
+
+	vtcFlowsCleanedUp = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Subsystem: InferenceExtension,
+			Name:      "vtc_flows_cleaned_total",
+			Help:      metricsutil.HelpMsgWithStability("Total number of stale flows cleaned up by VTC policy.", compbasemetrics.ALPHA),
+		},
+	)
 )
 
 var registerMetrics sync.Once

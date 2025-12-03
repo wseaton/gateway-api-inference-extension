@@ -19,32 +19,38 @@ limitations under the License.
 package besthead
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/framework"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/framework/plugins/policies/interflow/dispatch"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/types"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 )
 
 // BestHeadPolicyName is the name of the Best Head policy implementation.
 const BestHeadPolicyName = "BestHead"
 
 func init() {
-	dispatch.MustRegisterPolicy(dispatch.RegisteredPolicyName(BestHeadPolicyName),
-		func() (framework.InterFlowDispatchPolicy, error) {
-			return newBestHead(), nil
-		})
+	plugins.Register(BestHeadPolicyName, newBestHeadFactory)
 }
 
-type bestHead struct{}
-
-func newBestHead() *bestHead {
-	return &bestHead{}
+// newBestHeadFactory is the factory function for the BestHead policy.
+func newBestHeadFactory(name string, _ json.RawMessage, _ plugins.Handle) (plugins.Plugin, error) {
+	if name != BestHeadPolicyName {
+		return nil, fmt.Errorf("plugin name mismatch: expected %s, got %s", BestHeadPolicyName, name)
+	}
+	return &bestHead{
+		typedName: plugins.TypedName{Type: framework.InterFlowDispatchPolicyType, Name: name},
+	}, nil
 }
 
-// Name returns the name of the policy.
-func (p *bestHead) Name() string {
-	return BestHeadPolicyName
+type bestHead struct {
+	typedName plugins.TypedName
+}
+
+// TypedName returns the type and name of the plugin instance.
+func (p *bestHead) TypedName() plugins.TypedName {
+	return p.typedName
 }
 
 // SelectQueue implements a greedy strategy that bypasses fairness concerns to select the queue containing the single

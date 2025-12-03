@@ -94,7 +94,18 @@ func TestConfig_ValidateAndApplyDefaults(t *testing.T) {
 				assert.Equal(t, originalCfg.FlowGCTimeout, newCfg.FlowGCTimeout, "FlowGCTimeout should remain unchanged")
 				assert.Equal(t, originalCfg.EventChannelBufferSize, newCfg.EventChannelBufferSize,
 					"EventChannelBufferSize should remain unchanged")
-				assert.Equal(t, originalCfg.PriorityBands, newCfg.PriorityBands, "PriorityBands should remain unchanged")
+				// compare individual band fields (interFlowFactory is populated during validation)
+				require.Len(t, newCfg.PriorityBands, len(originalCfg.PriorityBands), "PriorityBands count should remain unchanged")
+				for i, band := range newCfg.PriorityBands {
+					origBand := originalCfg.PriorityBands[i]
+					assert.Equal(t, origBand.Priority, band.Priority, "Priority should remain unchanged")
+					assert.Equal(t, origBand.PriorityName, band.PriorityName, "PriorityName should remain unchanged")
+					assert.Equal(t, origBand.InterFlowDispatchPolicy, band.InterFlowDispatchPolicy, "InterFlowDispatchPolicy should remain unchanged")
+					assert.Equal(t, origBand.IntraFlowDispatchPolicy, band.IntraFlowDispatchPolicy, "IntraFlowDispatchPolicy should remain unchanged")
+					assert.Equal(t, origBand.Queue, band.Queue, "Queue should remain unchanged")
+					assert.Equal(t, origBand.MaxBytes, band.MaxBytes, "MaxBytes should remain unchanged")
+					assert.NotNil(t, band.interFlowFactory, "interFlowFactory should be populated during validation")
+				}
 			},
 		},
 		{
@@ -452,7 +463,17 @@ func TestConfig_DeepCopy(t *testing.T) {
 		assert.Equal(t, original.FlowGCTimeout, clone.FlowGCTimeout, "FlowGCTimeout should be copied")
 		assert.Equal(t, original.EventChannelBufferSize, clone.EventChannelBufferSize,
 			"EventChannelBufferSize should be copied")
-		assert.Equal(t, original.PriorityBands, clone.PriorityBands, "PriorityBands should be deeply copied")
+		// compare individual band fields (interFlowFactory can't be compared with reflect.DeepEqual)
+		require.Len(t, clone.PriorityBands, len(original.PriorityBands), "PriorityBands count should be copied")
+		for i, band := range clone.PriorityBands {
+			origBand := original.PriorityBands[i]
+			assert.Equal(t, origBand.Priority, band.Priority, "Priority should be copied")
+			assert.Equal(t, origBand.PriorityName, band.PriorityName, "PriorityName should be copied")
+			assert.Equal(t, origBand.InterFlowDispatchPolicy, band.InterFlowDispatchPolicy, "InterFlowDispatchPolicy should be copied")
+			assert.Equal(t, origBand.IntraFlowDispatchPolicy, band.IntraFlowDispatchPolicy, "IntraFlowDispatchPolicy should be copied")
+			assert.Equal(t, origBand.Queue, band.Queue, "Queue should be copied")
+			assert.Equal(t, origBand.MaxBytes, band.MaxBytes, "MaxBytes should be copied")
+		}
 	})
 
 	t.Run("ShouldBeIndependent_AfterCopying", func(t *testing.T) {
