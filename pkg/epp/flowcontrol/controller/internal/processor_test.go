@@ -108,6 +108,7 @@ func newTestHarness(t *testing.T, expiryCleanupInterval time.Duration) *testHarn
 	h.PriorityBandAccessorFunc = h.priorityBandAccessor
 	h.InterFlowDispatchPolicyFunc = h.interFlowDispatchPolicy
 	h.IntraFlowDispatchPolicyFunc = h.intraFlowDispatchPolicy
+	h.InterPriorityDispatchPolicyFunc = h.interPriorityDispatchPolicy
 
 	// Provide a default stats implementation that is effectively infinite.
 	h.StatsFunc = func() contracts.ShardStats {
@@ -285,6 +286,12 @@ func (h *testHarness) intraFlowDispatchPolicy(types.FlowKey) (framework.IntraFlo
 		return fqa.PeekHead()
 	}
 	return policy, nil
+}
+
+// interPriorityDispatchPolicy provides the mock implementation for the `contracts.RegistryShard` interface.
+func (h *testHarness) interPriorityDispatchPolicy() framework.InterPriorityDispatchPolicy {
+	// default to strict priority (first non-empty band wins)
+	return &frameworkmocks.MockInterPriorityDispatchPolicy{}
 }
 
 // TestShardProcessor contains all tests for the `ShardProcessor`.

@@ -206,3 +206,45 @@ func (m *MockInterFlowDispatchPolicy) SelectQueue(band framework.PriorityBandAcc
 }
 
 var _ framework.InterFlowDispatchPolicy = &MockInterFlowDispatchPolicy{}
+
+// MockInterPriorityDispatchPolicy is a behavioral mock for the `framework.InterPriorityDispatchPolicy` interface.
+// Simple accessors are configured with public value fields (e.g., `NameV`).
+// Complex methods with logic are configured with function fields (e.g., `SelectBandFunc`).
+type MockInterPriorityDispatchPolicy struct {
+	NameV                  string
+	SelectBandFunc         func(bands []framework.PriorityBandAccessor) (framework.PriorityBandAccessor, error)
+	OnDispatchCompleteFunc func(priority int, cost uint64)
+}
+
+func (m *MockInterPriorityDispatchPolicy) TypedName() plugins.TypedName {
+	return plugins.TypedName{Type: framework.InterPriorityDispatchPolicyType, Name: m.NameV}
+}
+
+func (m *MockInterPriorityDispatchPolicy) SelectBand(bands []framework.PriorityBandAccessor) (framework.PriorityBandAccessor, error) {
+	if m.SelectBandFunc != nil {
+		return m.SelectBandFunc(bands)
+	}
+	// default: select first non-empty band (strict priority)
+	for _, band := range bands {
+		hasWork := false
+		band.IterateQueues(func(q framework.FlowQueueAccessor) bool {
+			if q.Len() > 0 {
+				hasWork = true
+				return false
+			}
+			return true
+		})
+		if hasWork {
+			return band, nil
+		}
+	}
+	return nil, nil
+}
+
+func (m *MockInterPriorityDispatchPolicy) OnDispatchComplete(priority int, cost uint64) {
+	if m.OnDispatchCompleteFunc != nil {
+		m.OnDispatchCompleteFunc(priority, cost)
+	}
+}
+
+var _ framework.InterPriorityDispatchPolicy = &MockInterPriorityDispatchPolicy{}

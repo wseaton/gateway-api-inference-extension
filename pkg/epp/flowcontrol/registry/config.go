@@ -26,6 +26,9 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/framework"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/framework/plugins/policies/interflow/dispatch/besthead"
 	_ "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/framework/plugins/policies/interflow/dispatch/vtc"
+	interpriority "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/framework/plugins/policies/interpriority/dispatch"
+	_ "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/framework/plugins/policies/interpriority/dispatch/guaranteedminimum"
+	_ "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/framework/plugins/policies/interpriority/dispatch/strictpriority"
 	intra "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/framework/plugins/policies/intraflow/dispatch"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/framework/plugins/policies/intraflow/dispatch/fcfs"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/framework/plugins/queue"
@@ -44,6 +47,8 @@ const (
 	defaultIntraFlowDispatchPolicy intra.RegisteredPolicyName = fcfs.FCFSPolicyName
 	// defaultInterFlowDispatchPolicy is the default policy for selecting which flow's queue to service next.
 	defaultInterFlowDispatchPolicy string = besthead.BestHeadPolicyName
+	// defaultInterPriorityDispatchPolicy is the default policy for selecting which priority band to service next.
+	defaultInterPriorityDispatchPolicy interpriority.RegisteredPolicyName = "GuaranteedMinimum"
 	// defaultQueue is the default queue implementation for flows.
 	defaultQueue queue.RegisteredQueueName = queue.ListQueueName
 	// defaultInitialShardCount is the default number of parallel shards to create when the registry is initialized.
@@ -77,6 +82,13 @@ type Config struct {
 	// Required: At least one `PriorityBandConfig` must be provided for a functional registry.
 	PriorityBands []PriorityBandConfig
 
+	// InterPriorityDispatchPolicy specifies the policy for selecting which priority band to service next.
+	// Optional: Defaults to "StrictPriority".
+	InterPriorityDispatchPolicy interpriority.RegisteredPolicyName
+
+	// InterPriorityDispatchPolicyParams contains the raw JSON configuration for the selected InterPriorityDispatchPolicy.
+	InterPriorityDispatchPolicyParams json.RawMessage `json:"interPriorityDispatchPolicyParams,omitempty"`
+
 	// InitialShardCount specifies the number of parallel shards to create when the registry is initialized.
 	// This value must be greater than zero.
 	// Optional: Defaults to `defaultInitialShardCount` (1).
@@ -105,6 +117,10 @@ type Config struct {
 	// These enable dependency injection for unit testing the validation logic.
 	intraFlowDispatchPolicyFactory intraFlowDispatchPolicyFactory
 	queueFactory                   queueFactory
+
+	// interPriorityFactory is the resolved factory function for the InterPriorityDispatchPolicy.
+	// Populated during validation.
+	interPriorityFactory plugins.FactoryFunc `json:"-"`
 }
 
 // PriorityBandConfig defines the configuration template for a single priority band.
@@ -159,6 +175,15 @@ type ShardConfig struct {
 
 	// PriorityBands holds the partitioned configuration for each priority band managed by this shard.
 	PriorityBands []ShardPriorityBandConfig
+
+	// InterPriorityDispatchPolicy is the name of the policy for selecting which priority band to service next.
+	InterPriorityDispatchPolicy interpriority.RegisteredPolicyName
+
+	// InterPriorityDispatchPolicyParams contains the raw JSON configuration for the InterPriorityDispatchPolicy.
+	InterPriorityDispatchPolicyParams json.RawMessage `json:"-"`
+
+	// interPriorityFactory is the resolved factory function for the InterPriorityDispatchPolicy.
+	interPriorityFactory plugins.FactoryFunc `json:"-"`
 
 	// priorityBandMap provides O(1) lookups of `ShardPriorityBandConfig` by priority level.
 	// It serves as a correctness mechanism, ensuring that accessors return a safe, stable pointer to the correct element
@@ -227,6 +252,17 @@ func (c *Config) ValidateAndApplyDefaults() (*Config, error) {
 	if cfg.queueFactory == nil {
 		cfg.queueFactory = queue.NewQueueFromName
 	}
+
+	// Default and validate InterPriorityDispatchPolicy.
+	if cfg.InterPriorityDispatchPolicy == "" {
+		cfg.InterPriorityDispatchPolicy = defaultInterPriorityDispatchPolicy
+	}
+	interPriorityFactory, ok := plugins.Registry[string(cfg.InterPriorityDispatchPolicy)]
+	if !ok {
+		return nil, fmt.Errorf("config validation failed: InterPriorityDispatchPolicy %q not found in plugin registry",
+			cfg.InterPriorityDispatchPolicy)
+	}
+	cfg.interPriorityFactory = interPriorityFactory
 
 	if len(cfg.PriorityBands) == 0 {
 		return nil, errors.New("config validation failed: at least one priority band must be defined")
@@ -331,9 +367,12 @@ func (c *Config) validateBandCompatibility(band PriorityBandConfig) error {
 // evenly.
 func (c *Config) partition(shardIndex, totalShards int) *ShardConfig {
 	shardCfg := &ShardConfig{
-		MaxBytes:        partitionUint64(c.MaxBytes, shardIndex, totalShards),
-		PriorityBands:   make([]ShardPriorityBandConfig, len(c.PriorityBands)),
-		priorityBandMap: make(map[int]*ShardPriorityBandConfig, len(c.PriorityBands)),
+		MaxBytes:                          partitionUint64(c.MaxBytes, shardIndex, totalShards),
+		PriorityBands:                     make([]ShardPriorityBandConfig, len(c.PriorityBands)),
+		InterPriorityDispatchPolicy:       c.InterPriorityDispatchPolicy,
+		InterPriorityDispatchPolicyParams: c.InterPriorityDispatchPolicyParams,
+		interPriorityFactory:              c.interPriorityFactory,
+		priorityBandMap:                   make(map[int]*ShardPriorityBandConfig, len(c.PriorityBands)),
 	}
 
 	for i, template := range c.PriorityBands {
@@ -436,13 +475,21 @@ func (c *Config) deepCopy() *Config {
 		return nil
 	}
 	newCfg := &Config{
-		MaxBytes:                       c.MaxBytes,
-		InitialShardCount:              c.InitialShardCount,
-		FlowGCTimeout:                  c.FlowGCTimeout,
-		EventChannelBufferSize:         c.EventChannelBufferSize,
-		PriorityBands:                  make([]PriorityBandConfig, len(c.PriorityBands)),
-		intraFlowDispatchPolicyFactory: c.intraFlowDispatchPolicyFactory,
-		queueFactory:                   c.queueFactory,
+		MaxBytes:                          c.MaxBytes,
+		InitialShardCount:                 c.InitialShardCount,
+		FlowGCTimeout:                     c.FlowGCTimeout,
+		EventChannelBufferSize:            c.EventChannelBufferSize,
+		PriorityBands:                     make([]PriorityBandConfig, len(c.PriorityBands)),
+		InterPriorityDispatchPolicy:       c.InterPriorityDispatchPolicy,
+		interPriorityFactory:              c.interPriorityFactory,
+		intraFlowDispatchPolicyFactory:    c.intraFlowDispatchPolicyFactory,
+		queueFactory:                      c.queueFactory,
+	}
+
+	// Deep copy InterPriorityDispatchPolicyParams if present.
+	if c.InterPriorityDispatchPolicyParams != nil {
+		newCfg.InterPriorityDispatchPolicyParams = make(json.RawMessage, len(c.InterPriorityDispatchPolicyParams))
+		copy(newCfg.InterPriorityDispatchPolicyParams, c.InterPriorityDispatchPolicyParams)
 	}
 
 	for i, band := range c.PriorityBands {

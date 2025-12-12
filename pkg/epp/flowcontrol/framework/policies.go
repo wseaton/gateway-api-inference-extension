@@ -22,7 +22,8 @@ import (
 )
 
 const (
-	InterFlowDispatchPolicyType = "InterFlowDispatchPolicy"
+	InterFlowDispatchPolicyType      = "InterFlowDispatchPolicy"
+	InterPriorityDispatchPolicyType  = "InterPriorityDispatchPolicy"
 )
 
 // PriorityScoreType is a descriptor for the domain of a policy's item comparator.
@@ -145,6 +146,30 @@ type InterFlowDispatchPolicy interface {
 	//
 	// Conformance: Implementations MUST be goroutine-safe if they maintain internal state.
 	SelectQueue(band PriorityBandAccessor) (selectedQueue FlowQueueAccessor, err error)
+}
+
+// InterPriorityDispatchPolicy selects which priority band to service next.
+// This is the top-level scheduling decision in the dispatch hierarchy, determining which priority
+// band should get the next dispatch slot before the InterFlowDispatchPolicy selects a queue within that band.
+//
+// Implementations define the policy for distributing dispatch opportunities across priority levels,
+// which can range from strict priority ordering to policies that provide minimum guarantees for
+// lower-priority bands.
+type InterPriorityDispatchPolicy interface {
+	plugins.Plugin
+
+	// SelectBand chooses which priority band should get the next dispatch slot.
+	// The bands slice is provided in descending priority order (highest first).
+	// Returns nil if no band should be serviced (e.g., all empty).
+	//
+	// Conformance: Implementations MUST be goroutine-safe if they maintain internal state.
+	SelectBand(bands []PriorityBandAccessor) (PriorityBandAccessor, error)
+
+	// OnDispatchComplete is called after a successful dispatch from a band.
+	// Allows policies to update internal state (e.g., counters, deficit trackers).
+	// The priority identifies which band was serviced, and cost represents the
+	// dispatched item's resource consumption (typically byte size).
+	OnDispatchComplete(priority int, cost uint64)
 }
 
 // RequestCompletionListener is an optional interface that dispatch policies can implement to receive

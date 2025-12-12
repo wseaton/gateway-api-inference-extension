@@ -39,20 +39,22 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/framework"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/types"
 	typesmocks "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/types/mocks"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 )
 
 // MockRegistryShard is a simple "stub-style" mock for testing.
 // Its methods are implemented as function fields (e.g., `IDFunc`). A test can inject behavior by setting the desired
 // function field in the test setup. If a func is nil, the method will return a zero value.
 type MockRegistryShard struct {
-	IDFunc                       func() string
-	IsActiveFunc                 func() bool
-	ManagedQueueFunc             func(key types.FlowKey) (contracts.ManagedQueue, error)
-	IntraFlowDispatchPolicyFunc  func(key types.FlowKey) (framework.IntraFlowDispatchPolicy, error)
-	InterFlowDispatchPolicyFunc  func(priority int) (framework.InterFlowDispatchPolicy, error)
-	PriorityBandAccessorFunc     func(priority int) (framework.PriorityBandAccessor, error)
-	AllOrderedPriorityLevelsFunc func() []int
-	StatsFunc                    func() contracts.ShardStats
+	IDFunc                           func() string
+	IsActiveFunc                     func() bool
+	ManagedQueueFunc                 func(key types.FlowKey) (contracts.ManagedQueue, error)
+	IntraFlowDispatchPolicyFunc      func(key types.FlowKey) (framework.IntraFlowDispatchPolicy, error)
+	InterFlowDispatchPolicyFunc      func(priority int) (framework.InterFlowDispatchPolicy, error)
+	InterPriorityDispatchPolicyFunc  func() framework.InterPriorityDispatchPolicy
+	PriorityBandAccessorFunc         func(priority int) (framework.PriorityBandAccessor, error)
+	AllOrderedPriorityLevelsFunc     func() []int
+	StatsFunc                        func() contracts.ShardStats
 }
 
 func (m *MockRegistryShard) ID() string {
@@ -89,6 +91,40 @@ func (m *MockRegistryShard) InterFlowDispatchPolicy(priority int) (framework.Int
 	}
 	return nil, nil
 }
+
+func (m *MockRegistryShard) InterPriorityDispatchPolicy() framework.InterPriorityDispatchPolicy {
+	if m.InterPriorityDispatchPolicyFunc != nil {
+		return m.InterPriorityDispatchPolicyFunc()
+	}
+	// default to a mock policy implementing strict priority
+	return &defaultInterPriorityPolicy{}
+}
+
+// defaultInterPriorityPolicy implements strict priority for mocks
+type defaultInterPriorityPolicy struct{}
+
+func (p *defaultInterPriorityPolicy) TypedName() plugins.TypedName {
+	return plugins.TypedName{Type: framework.InterPriorityDispatchPolicyType, Name: "MockStrictPriority"}
+}
+
+func (p *defaultInterPriorityPolicy) SelectBand(bands []framework.PriorityBandAccessor) (framework.PriorityBandAccessor, error) {
+	for _, band := range bands {
+		hasWork := false
+		band.IterateQueues(func(q framework.FlowQueueAccessor) bool {
+			if q.Len() > 0 {
+				hasWork = true
+				return false
+			}
+			return true
+		})
+		if hasWork {
+			return band, nil
+		}
+	}
+	return nil, nil
+}
+
+func (p *defaultInterPriorityPolicy) OnDispatchComplete(_ int, _ uint64) {}
 
 func (m *MockRegistryShard) PriorityBandAccessor(priority int) (framework.PriorityBandAccessor, error) {
 	if m.PriorityBandAccessorFunc != nil {

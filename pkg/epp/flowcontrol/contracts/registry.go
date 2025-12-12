@@ -137,6 +137,11 @@ type RegistryShard interface {
 	// `controller.FlowController` worker's dispatch loop.
 	AllOrderedPriorityLevels() []int
 
+	// InterPriorityDispatchPolicy retrieves the configured `framework.InterPriorityDispatchPolicy` for this shard.
+	// This policy determines which priority band should get the next dispatch slot.
+	// The registry guarantees that a non-nil default policy (StrictPriority) is returned if none is configured.
+	InterPriorityDispatchPolicy() framework.InterPriorityDispatchPolicy
+
 	// Stats returns a near consistent snapshot of the shard's state.
 	Stats() ShardStats
 }

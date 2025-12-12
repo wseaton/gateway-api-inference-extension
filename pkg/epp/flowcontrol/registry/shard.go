@@ -17,6 +17,7 @@ limitations under the License.
 package registry
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"sync"
@@ -78,6 +79,8 @@ type registryShard struct {
 	onStatsDelta propagateStatsDeltaFunc
 	// orderedPriorityLevels is a cached, sorted list of priority levels.
 	orderedPriorityLevels []int
+	// interPriorityPolicy is the policy for selecting which priority band to service next.
+	interPriorityPolicy framework.InterPriorityDispatchPolicy
 
 	// --- State Protected by `mu` ---
 
@@ -119,6 +122,45 @@ func newShard(
 		onStatsDelta:  onStatsDelta,
 		priorityBands: make(map[int]*priorityBand, len(config.PriorityBands)),
 	}
+
+	// instantiate InterPriorityDispatchPolicy
+	interPriorityPolicyName := string(config.InterPriorityDispatchPolicy)
+	policyParams := config.InterPriorityDispatchPolicyParams
+
+	// if using GuaranteedMinimum with no config, auto-generate a default that gives lowest band 5%
+	if interPriorityPolicyName == "GuaranteedMinimum" && len(policyParams) == 0 {
+		lowestPriority := findLowestPriority(config.PriorityBands)
+		defaultConfig := map[string]any{
+			"minGuaranteedRates": map[string]float64{
+				fmt.Sprintf("%d", lowestPriority): 0.05, // 5% for lowest priority
+			},
+		}
+		var err error
+		policyParams, err = json.Marshal(defaultConfig)
+		if err != nil {
+			shardLogger.Error(err, "Failed to marshal default GuaranteedMinimum config")
+			return nil, fmt.Errorf("failed to marshal default GuaranteedMinimum config: %w", err)
+		}
+		shardLogger.Info("Auto-configured GuaranteedMinimum with 5% minimum for lowest priority band",
+			"lowestPriority", lowestPriority)
+	}
+
+	shardLogger.Info("Instantiating InterPriorityDispatchPolicy",
+		"policyName", interPriorityPolicyName,
+		"config", string(policyParams))
+
+	interPriorityPlugin, err := config.interPriorityFactory(interPriorityPolicyName, policyParams, handle)
+	if err != nil {
+		shardLogger.Error(err, "Failed to create inter-priority policy", "policyName", interPriorityPolicyName)
+		return nil, fmt.Errorf("failed to create inter-priority policy %q: %w", interPriorityPolicyName, err)
+	}
+
+	interPriorityPolicy, ok := interPriorityPlugin.(framework.InterPriorityDispatchPolicy)
+	if !ok {
+		shardLogger.Error(nil, "Plugin is not a valid InterPriorityDispatchPolicy", "policyName", interPriorityPolicyName)
+		return nil, fmt.Errorf("plugin %q is not a valid InterPriorityDispatchPolicy", interPriorityPolicyName)
+	}
+	s.interPriorityPolicy = interPriorityPolicy
 
 	for _, bandConfig := range config.PriorityBands {
 		policyName := bandConfig.InterFlowDispatchPolicy
@@ -228,6 +270,12 @@ func (s *registryShard) PriorityBandAccessor(priority int) (framework.PriorityBa
 // This is a lock-free read.
 func (s *registryShard) AllOrderedPriorityLevels() []int {
 	return s.orderedPriorityLevels
+}
+
+// InterPriorityDispatchPolicy returns the policy for selecting which priority band to service next.
+// This is a lock-free read as the policy is immutable after shard initialization.
+func (s *registryShard) InterPriorityDispatchPolicy() framework.InterPriorityDispatchPolicy {
+	return s.interPriorityPolicy
 }
 
 // Stats returns a snapshot of the aggregated statistics for this specific shard.
@@ -428,4 +476,19 @@ func (a *priorityBandAccessor) IterateQueues(callback func(queue framework.FlowQ
 			return
 		}
 	}
+}
+
+// findLowestPriority returns the lowest priority value from a slice of band configs.
+// lower numeric value = lower priority in the convention used here.
+func findLowestPriority(bands []ShardPriorityBandConfig) int {
+	if len(bands) == 0 {
+		return 0
+	}
+	lowest := bands[0].Priority
+	for _, band := range bands[1:] {
+		if band.Priority < lowest {
+			lowest = band.Priority
+		}
+	}
+	return lowest
 }

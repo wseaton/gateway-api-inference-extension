@@ -279,55 +279,81 @@ func (sp *ShardProcessor) hasCapacity(priority int, itemByteSize uint64) bool {
 	return bandStats.ByteSize+itemByteSize <= bandStats.CapacityBytes
 }
 
-// dispatchCycle attempts to dispatch a single item by iterating through priority bands from highest to lowest.
+// dispatchCycle attempts to dispatch a single item using the configured InterPriorityDispatchPolicy.
 // It applies the configured policies for each band to select an item and then attempts to dispatch it.
 // It returns true if an item was successfully dispatched, and false otherwise.
 // It enforces Head-of-Line (HoL) blocking if the selected item is saturated.
 //
 // # Work Conservation and Head-of-Line (HoL) Blocking
 //
-// The cycle attempts to be work-conserving by skipping bands where selection fails.
+// The cycle attempts to be work-conserving by using the InterPriorityDispatchPolicy to select which band to service.
 // However, if a selected item is saturated (cannot be scheduled), the cycle stops immediately. This enforces HoL
 // blocking to respect the policy's decision and prevent priority inversion, where dispatching lower-priority work might
 // exacerbate the saturation affecting the high-priority item.
 func (sp *ShardProcessor) dispatchCycle(ctx context.Context) bool {
-	for _, priority := range sp.shard.AllOrderedPriorityLevels() {
-		originalBand, err := sp.shard.PriorityBandAccessor(priority)
+	// collect all priority bands in descending priority order
+	bands := sp.collectPriorityBands()
+	if len(bands) == 0 {
+		return false
+	}
+
+	// let the inter-priority policy select which band to service
+	interPriorityPolicy := sp.shard.InterPriorityDispatchPolicy()
+	selectedBand, err := interPriorityPolicy.SelectBand(bands)
+	if err != nil {
+		sp.logger.Error(err, "InterPriorityDispatchPolicy.SelectBand failed")
+		return false
+	}
+	if selectedBand == nil {
+		return false
+	}
+
+	item, err := sp.selectItem(selectedBand)
+	if err != nil {
+		sp.logger.Error(err, "Failed to select item from policy-selected band",
+			"priority", selectedBand.Priority(), "priorityName", selectedBand.PriorityName())
+		return false
+	}
+	if item == nil {
+		return false
+	}
+
+	// --- Viability Check (Saturation/HoL Blocking) ---
+	req := item.OriginalRequest()
+	candidatePods := req.CandidatePodsForScheduling()
+	if sp.saturationDetector.IsSaturated(ctx, candidatePods) {
+		sp.logger.V(logutil.DEBUG).Info("Policy's chosen item is saturated; enforcing HoL blocking.",
+			"flowKey", req.FlowKey(), "reqID", req.ID(), "priorityName", selectedBand.PriorityName())
+		// Stop the dispatch cycle entirely to respect strict policy decision and prevent priority inversion where
+		// lower-priority work might exacerbate the saturation affecting high-priority work.
+		return false
+	}
+
+	// --- Dispatch ---
+	if err := sp.dispatchItem(item); err != nil {
+		sp.logger.Error(err, "Failed to dispatch item",
+			"flowKey", req.FlowKey(), "reqID", req.ID(), "priorityName", selectedBand.PriorityName())
+		return false
+	}
+
+	// notify the policy of successful dispatch
+	interPriorityPolicy.OnDispatchComplete(selectedBand.Priority(), req.ByteSize())
+	return true
+}
+
+// collectPriorityBands gathers all priority band accessors in descending priority order.
+func (sp *ShardProcessor) collectPriorityBands() []framework.PriorityBandAccessor {
+	priorities := sp.shard.AllOrderedPriorityLevels()
+	bands := make([]framework.PriorityBandAccessor, 0, len(priorities))
+	for _, priority := range priorities {
+		band, err := sp.shard.PriorityBandAccessor(priority)
 		if err != nil {
 			sp.logger.Error(err, "Failed to get PriorityBandAccessor, skipping band", "priority", priority)
 			continue
 		}
-
-		item, err := sp.selectItem(originalBand)
-		if err != nil {
-			sp.logger.Error(err, "Failed to select item, skipping priority band for this cycle",
-				"priority", priority, "priorityName", originalBand.PriorityName())
-			continue // Continue to the next band to maximize work conservation.
-		}
-		if item == nil {
-			continue
-		}
-
-		// --- Viability Check (Saturation/HoL Blocking) ---
-		req := item.OriginalRequest()
-		candidatePods := req.CandidatePodsForScheduling()
-		if sp.saturationDetector.IsSaturated(ctx, candidatePods) {
-			sp.logger.V(logutil.DEBUG).Info("Policy's chosen item is saturated; enforcing HoL blocking.",
-				"flowKey", req.FlowKey(), "reqID", req.ID(), "priorityName", originalBand.PriorityName())
-			// Stop the dispatch cycle entirely to respect strict policy decision and prevent priority inversion where
-			// lower-priority work might exacerbate the saturation affecting high-priority work.
-			return false
-		}
-
-		// --- Dispatch ---
-		if err := sp.dispatchItem(item); err != nil {
-			sp.logger.Error(err, "Failed to dispatch item, skipping priority band for this cycle",
-				"flowKey", req.FlowKey(), "reqID", req.ID(), "priorityName", originalBand.PriorityName())
-			continue // Continue to the next band to maximize work conservation.
-		}
-		return true
+		bands = append(bands, band)
 	}
-	return false
+	return bands
 }
 
 // selectItem applies the configured inter- and intra-flow dispatch policies to select a single item.
