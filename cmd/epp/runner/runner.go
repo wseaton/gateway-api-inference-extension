@@ -90,6 +90,7 @@ var flowControlConfig = flowcontrol.Config{
 		// Define domain of accepted priority levels as this field is required. Use defaults for all optional fields.
 		// TODO: this should not be hardcoded.
 		PriorityBands: []fcregistry.PriorityBandConfig{
+			{Priority: 10, PriorityName: "High", InterFlowDispatchPolicy: "VTC"},
 			{Priority: 0, PriorityName: "Default", InterFlowDispatchPolicy: "VTC"},
 		},
 	},
