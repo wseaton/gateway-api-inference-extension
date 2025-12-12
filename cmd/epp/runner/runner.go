@@ -51,9 +51,13 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer"
 	dlmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer/metrics"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datastore"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol"
 	fccontroller "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/controller"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/framework"
 	fcregistry "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/registry"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/framework/plugins/policies/interflow/dispatch/vtc"
+	schedulingtypes "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metrics"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metrics/collectors"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
@@ -347,6 +351,10 @@ func (r *Runner) Run(ctx context.Context) error {
 		}
 		go registry.Run(ctx)
 		admissionController = requestcontrol.NewFlowControlAdmissionController(saturationDetector, fc)
+
+		// wire VTC completion listener to update counters on request completion
+		vtcAdapter := &vtcCompletionAdapter{listener: vtc.GetGlobalCompletionListener()}
+		r.requestControlConfig.AddPlugins(vtcAdapter)
 	} else {
 		setupLog.Info("Experimental Flow Control layer is disabled, using legacy admission control")
 		admissionController = requestcontrol.NewLegacyAdmissionController(saturationDetector)
@@ -616,4 +624,25 @@ func setupPprofHandlers(mgr ctrl.Manager) error {
 		}
 	}
 	return nil
+}
+
+// vtcCompletionAdapter adapts framework.RequestCompletionListener to requestcontrol.ResponseComplete.
+// bridges the VTC policy (which uses flow control types) to the request control layer.
+type vtcCompletionAdapter struct {
+	listener framework.RequestCompletionListener
+}
+
+func (a *vtcCompletionAdapter) TypedName() plugins.TypedName {
+	return plugins.TypedName{Type: "VTCCompletionAdapter", Name: vtc.VTCPolicyName}
+}
+
+func (a *vtcCompletionAdapter) ResponseComplete(_ context.Context, _ *schedulingtypes.LLMRequest, response *requestcontrol.Response, _ *backend.Pod) {
+	if response == nil || response.Usage == nil {
+		return
+	}
+	flowID := response.FairnessID
+	if flowID == "" {
+		return
+	}
+	a.listener.OnRequestComplete(flowID, response.Priority, response.Usage.PromptTokens, response.Usage.CompletionTokens)
 }
