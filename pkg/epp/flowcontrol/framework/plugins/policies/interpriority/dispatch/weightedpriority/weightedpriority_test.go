@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package guaranteedminimum
+package weightedpriority
 
 import (
 	"sync"
@@ -71,124 +71,123 @@ func (m *mockPriorityBand) IterateQueues(callback func(queue framework.FlowQueue
 	}
 }
 
-func TestGuaranteedMinimum_SelectBand_StrictPriorityWhenNoStarvation(t *testing.T) {
+func TestWeightedPriority_SelectBand_SelectsLowestNormalized(t *testing.T) {
 	config := Config{
-		MinGuaranteedRates: map[int]float64{
-			50: 0.1, // batch gets 10% minimum
+		Weights: map[int]float64{
+			100: 10.0, // high priority weight
+			50:  1.0,  // low priority weight
 		},
 	}
 
-	policy := newGuaranteedMinimum(config, "test")
+	policy := newWeightedPriority(config, "test")
 
-	// simulate dispatches where batch is at 20% (above its 10% minimum)
-	for i := 0; i < 80; i++ {
-		policy.OnDispatchComplete(100, 0) // online
-	}
-	for i := 0; i < 20; i++ {
-		policy.OnDispatchComplete(50, 0) // batch
+	// simulate equal dispatches - priority 100 should be selected (lower normalized)
+	// after 10 dispatches each: normalized_100 = 10/10 = 1, normalized_50 = 10/1 = 10
+	for i := 0; i < 10; i++ {
+		policy.OnDispatchComplete(100, 0)
+		policy.OnDispatchComplete(50, 0)
 	}
 
 	bands := []framework.PriorityBandAccessor{
 		&mockPriorityBand{
 			priority:     100,
-			priorityName: "online",
+			priorityName: "high",
 			queues: []framework.FlowQueueAccessor{
 				&mockFlowQueue{flowKey: types.FlowKey{ID: "flow1", Priority: 100}, length: 1},
 			},
 		},
 		&mockPriorityBand{
 			priority:     50,
-			priorityName: "batch",
+			priorityName: "low",
 			queues: []framework.FlowQueueAccessor{
 				&mockFlowQueue{flowKey: types.FlowKey{ID: "flow2", Priority: 50}, length: 1},
 			},
 		},
 	}
 
-	// batch is above minimum, so strict priority should apply
+	// priority 100 has lower normalized, should be selected
 	got, err := policy.SelectBand(bands)
 	if err != nil {
 		t.Fatalf("SelectBand returned error: %v", err)
 	}
 	if got == nil || got.Priority() != 100 {
-		t.Errorf("expected priority 100 (strict priority), got %v", got)
+		t.Errorf("expected priority 100 (lower normalized), got %v", got)
 	}
 }
 
-func TestGuaranteedMinimum_SelectBand_BoostsStarvedBand(t *testing.T) {
+func TestWeightedPriority_SelectBand_WeightAffectsSelection(t *testing.T) {
 	config := Config{
-		MinGuaranteedRates: map[int]float64{
-			50: 0.1, // batch gets 10% minimum
+		Weights: map[int]float64{
+			100: 10.0, // high gets 10x weight
+			50:  1.0,  // low gets 1x weight
 		},
 	}
 
-	policy := newGuaranteedMinimum(config, "test")
+	policy := newWeightedPriority(config, "test")
 
-	// simulate dispatches where batch is at 2% (below its 10% minimum)
-	for i := 0; i < 98; i++ {
-		policy.OnDispatchComplete(100, 0) // online
+	// give high priority 100 dispatches, low priority 5
+	// normalized_100 = 100/10 = 10, normalized_50 = 5/1 = 5
+	// low priority has lower normalized, should be selected
+	for i := 0; i < 100; i++ {
+		policy.OnDispatchComplete(100, 0)
 	}
-	for i := 0; i < 2; i++ {
-		policy.OnDispatchComplete(50, 0) // batch
+	for i := 0; i < 5; i++ {
+		policy.OnDispatchComplete(50, 0)
 	}
 
 	bands := []framework.PriorityBandAccessor{
 		&mockPriorityBand{
 			priority:     100,
-			priorityName: "online",
+			priorityName: "high",
 			queues: []framework.FlowQueueAccessor{
 				&mockFlowQueue{flowKey: types.FlowKey{ID: "flow1", Priority: 100}, length: 1},
 			},
 		},
 		&mockPriorityBand{
 			priority:     50,
-			priorityName: "batch",
+			priorityName: "low",
 			queues: []framework.FlowQueueAccessor{
 				&mockFlowQueue{flowKey: types.FlowKey{ID: "flow2", Priority: 50}, length: 1},
 			},
 		},
 	}
 
-	// batch is below minimum, so it should be boosted
+	// low priority (normalized=5) < high priority (normalized=10), so low is selected
 	got, err := policy.SelectBand(bands)
 	if err != nil {
 		t.Fatalf("SelectBand returned error: %v", err)
 	}
 	if got == nil || got.Priority() != 50 {
-		t.Errorf("expected priority 50 (starved band boost), got %v", got)
+		t.Errorf("expected priority 50 (lower normalized due to fewer dispatches), got %v", got)
 	}
 }
 
-func TestGuaranteedMinimum_SelectBand_SkipsEmptyStarvedBand(t *testing.T) {
+func TestWeightedPriority_SelectBand_SkipsEmptyBands(t *testing.T) {
 	config := Config{
-		MinGuaranteedRates: map[int]float64{
-			50: 0.1, // batch gets 10% minimum
+		Weights: map[int]float64{
+			100: 10.0,
+			50:  1.0,
 		},
 	}
 
-	policy := newGuaranteedMinimum(config, "test")
-
-	// batch has 0 dispatches but has no work
-	for i := 0; i < 100; i++ {
-		policy.OnDispatchComplete(100, 0)
-	}
+	policy := newWeightedPriority(config, "test")
 
 	bands := []framework.PriorityBandAccessor{
 		&mockPriorityBand{
 			priority:     100,
-			priorityName: "online",
+			priorityName: "high",
 			queues: []framework.FlowQueueAccessor{
 				&mockFlowQueue{flowKey: types.FlowKey{ID: "flow1", Priority: 100}, length: 1},
 			},
 		},
 		&mockPriorityBand{
 			priority:     50,
-			priorityName: "batch",
+			priorityName: "low",
 			queues:       []framework.FlowQueueAccessor{}, // no queues
 		},
 	}
 
-	// batch has no work, so online should be selected
+	// low has no work, so high should be selected
 	got, err := policy.SelectBand(bands)
 	if err != nil {
 		t.Fatalf("SelectBand returned error: %v", err)
@@ -198,19 +197,19 @@ func TestGuaranteedMinimum_SelectBand_SkipsEmptyStarvedBand(t *testing.T) {
 	}
 }
 
-func TestGuaranteedMinimum_ConcurrentAccess(t *testing.T) {
+func TestWeightedPriority_ConcurrentAccess(t *testing.T) {
 	config := Config{
-		MinGuaranteedRates: map[int]float64{
-			50: 0.1,
+		Weights: map[int]float64{
+			100: 10.0,
 		},
 	}
 
-	policy := newGuaranteedMinimum(config, "test")
+	policy := newWeightedPriority(config, "test")
 
 	bands := []framework.PriorityBandAccessor{
 		&mockPriorityBand{
 			priority:     100,
-			priorityName: "online",
+			priorityName: "high",
 			queues: []framework.FlowQueueAccessor{
 				&mockFlowQueue{flowKey: types.FlowKey{ID: "flow1", Priority: 100}, length: 1},
 			},
@@ -256,66 +255,67 @@ func TestGuaranteedMinimum_ConcurrentAccess(t *testing.T) {
 	}
 }
 
-func TestGuaranteedMinimum_SelectsMostStarvedBand(t *testing.T) {
+func TestWeightedPriority_SelectsMostBehindBand(t *testing.T) {
 	config := Config{
-		MinGuaranteedRates: map[int]float64{
-			50: 0.20, // band 50 wants 20%, getting 5% (deficit 15%)
-			25: 0.10, // band 25 wants 10%, getting 2% (deficit 8%)
+		Weights: map[int]float64{
+			100: 10.0, // high
+			50:  5.0,  // medium
+			25:  1.0,  // low
 		},
 	}
 
-	policy := newGuaranteedMinimum(config, "test")
+	policy := newWeightedPriority(config, "test")
 
-	// 93 online, 5 for priority 50, 2 for priority 25
-	for i := 0; i < 93; i++ {
+	// set up counters so each has different normalized values
+	// high: 50 dispatches, normalized = 50/10 = 5
+	// medium: 20 dispatches, normalized = 20/5 = 4
+	// low: 10 dispatches, normalized = 10/1 = 10
+	for i := 0; i < 50; i++ {
 		policy.OnDispatchComplete(100, 0)
 	}
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 20; i++ {
 		policy.OnDispatchComplete(50, 0)
 	}
-	for i := 0; i < 2; i++ {
+	for i := 0; i < 10; i++ {
 		policy.OnDispatchComplete(25, 0)
 	}
 
 	bands := []framework.PriorityBandAccessor{
 		&mockPriorityBand{
 			priority:     100,
-			priorityName: "online",
+			priorityName: "high",
 			queues: []framework.FlowQueueAccessor{
 				&mockFlowQueue{flowKey: types.FlowKey{ID: "flow1", Priority: 100}, length: 1},
 			},
 		},
 		&mockPriorityBand{
 			priority:     50,
-			priorityName: "batch",
+			priorityName: "medium",
 			queues: []framework.FlowQueueAccessor{
 				&mockFlowQueue{flowKey: types.FlowKey{ID: "flow2", Priority: 50}, length: 1},
 			},
 		},
 		&mockPriorityBand{
 			priority:     25,
-			priorityName: "background",
+			priorityName: "low",
 			queues: []framework.FlowQueueAccessor{
 				&mockFlowQueue{flowKey: types.FlowKey{ID: "flow3", Priority: 25}, length: 1},
 			},
 		},
 	}
 
-	// band 25 is most behind: normalized = 2/0.10 = 20
-	// band 50 normalized = 5/0.20 = 25
-	// online normalized = 93/1.0 = 93
-	// both are behind online, but band 25 is more behind
+	// medium (normalized=4) is most behind, should be selected
 	got, err := policy.SelectBand(bands)
 	if err != nil {
 		t.Fatalf("SelectBand returned error: %v", err)
 	}
-	if got == nil || got.Priority() != 25 {
-		t.Errorf("expected priority 25 (most behind), got %v", got)
+	if got == nil || got.Priority() != 50 {
+		t.Errorf("expected priority 50 (most behind), got %v", got)
 	}
 }
 
-func TestGuaranteedMinimum_TypedName(t *testing.T) {
-	policy := newGuaranteedMinimum(DefaultConfig(), "test-policy")
+func TestWeightedPriority_TypedName(t *testing.T) {
+	policy := newWeightedPriority(DefaultConfig(), "test-policy")
 
 	typedName := policy.TypedName()
 	if typedName.Type != framework.InterPriorityDispatchPolicyType {
@@ -326,15 +326,17 @@ func TestGuaranteedMinimum_TypedName(t *testing.T) {
 	}
 }
 
-func TestGuaranteedMinimum_ColdStart_UsesStrictPriority(t *testing.T) {
-	// on cold start (no dispatches yet), strict priority should apply
+func TestWeightedPriority_ColdStart_SelectsFirstWithWork(t *testing.T) {
+	// on cold start (no dispatches yet), all normalized values are 0
+	// should select first band with work (arbitrary but deterministic)
 	config := Config{
-		MinGuaranteedRates: map[int]float64{
-			0: 0.05, // low priority gets 5% minimum
+		Weights: map[int]float64{
+			10: 10.0,
+			0:  1.0,
 		},
 	}
 
-	policy := newGuaranteedMinimum(config, "test")
+	policy := newWeightedPriority(config, "test")
 
 	// no dispatches yet - all counters are 0
 	bands := []framework.PriorityBandAccessor{
@@ -355,25 +357,25 @@ func TestGuaranteedMinimum_ColdStart_UsesStrictPriority(t *testing.T) {
 	}
 
 	// with all counters at 0, normalized values are equal (0/x = 0 for all x)
-	// so no band is "behind" another, strict priority wins
+	// first band with work is selected
 	got, err := policy.SelectBand(bands)
 	if err != nil {
 		t.Fatalf("SelectBand returned error: %v", err)
 	}
 	if got == nil || got.Priority() != 10 {
-		t.Errorf("expected priority 10 (strict priority on cold start), got %v", got)
+		t.Errorf("expected priority 10 (first band with work), got %v", got)
 	}
 }
 
-func TestGuaranteedMinimum_CounterPreservation_AcrossOperations(t *testing.T) {
-	// counters are preserved across operations (unlike sliding window)
+func TestWeightedPriority_CounterPreservation_AcrossOperations(t *testing.T) {
 	config := Config{
-		MinGuaranteedRates: map[int]float64{
-			50: 0.1,
+		Weights: map[int]float64{
+			100: 10.0,
+			50:  1.0,
 		},
 	}
 
-	policy := newGuaranteedMinimum(config, "test")
+	policy := newWeightedPriority(config, "test")
 
 	// do some dispatches
 	for i := 0; i < 100; i++ {
@@ -405,15 +407,15 @@ func TestGuaranteedMinimum_CounterPreservation_AcrossOperations(t *testing.T) {
 	}
 }
 
-func TestGuaranteedMinimum_CostBasedAccounting(t *testing.T) {
-	// verify that cost parameter is used for counter increments
+func TestWeightedPriority_CostBasedAccounting(t *testing.T) {
 	config := Config{
-		MinGuaranteedRates: map[int]float64{
-			50: 0.1,
+		Weights: map[int]float64{
+			100: 10.0,
+			50:  1.0,
 		},
 	}
 
-	policy := newGuaranteedMinimum(config, "test")
+	policy := newWeightedPriority(config, "test")
 
 	// dispatch with explicit costs
 	policy.OnDispatchComplete(100, 500) // 500 tokens
@@ -432,106 +434,50 @@ func TestGuaranteedMinimum_CostBasedAccounting(t *testing.T) {
 	}
 }
 
-func TestGuaranteedMinimum_NormalizedComparison(t *testing.T) {
-	// verify the VTC-style normalized comparison works correctly
+func TestWeightedPriority_DefaultWeight(t *testing.T) {
+	// bands not in config should default to weight 1.0
 	config := Config{
-		MinGuaranteedRates: map[int]float64{
-			50: 0.1, // 10% guarantee
+		Weights: map[int]float64{
+			100: 2.0, // only configure priority 100
 		},
 	}
+	policy := newWeightedPriority(config, "test")
 
-	policy := newGuaranteedMinimum(config, "test")
-
-	// set up counters where batch is exactly at its fair share
-	// online has 90, batch has 10 -> batch is at exactly 10%
-	// normalized_online = 90/1.0 = 90
-	// normalized_batch = 10/0.1 = 100
-	// batch's normalized (100) > online's normalized (90), so batch is NOT behind
-	for i := 0; i < 90; i++ {
-		policy.OnDispatchComplete(100, 0)
-	}
-	for i := 0; i < 10; i++ {
-		policy.OnDispatchComplete(50, 0)
+	// simulate equal dispatches
+	for i := 0; i < 100; i++ {
+		policy.OnDispatchComplete(100, 0) // weight 2.0, normalized = 100/2 = 50
+		policy.OnDispatchComplete(50, 0)  // weight 1.0 (default), normalized = 100/1 = 100
 	}
 
 	bands := []framework.PriorityBandAccessor{
 		&mockPriorityBand{
 			priority:     100,
-			priorityName: "online",
+			priorityName: "configured",
 			queues: []framework.FlowQueueAccessor{
 				&mockFlowQueue{flowKey: types.FlowKey{ID: "flow1", Priority: 100}, length: 1},
 			},
 		},
 		&mockPriorityBand{
 			priority:     50,
-			priorityName: "batch",
+			priorityName: "unconfigured",
 			queues: []framework.FlowQueueAccessor{
 				&mockFlowQueue{flowKey: types.FlowKey{ID: "flow2", Priority: 50}, length: 1},
 			},
 		},
 	}
 
-	// batch is at fair share, strict priority should apply
+	// priority 100 (normalized=50) < priority 50 (normalized=100)
 	got, err := policy.SelectBand(bands)
 	if err != nil {
 		t.Fatalf("SelectBand returned error: %v", err)
 	}
 	if got == nil || got.Priority() != 100 {
-		t.Errorf("expected priority 100 (batch at fair share), got %v", got)
+		t.Errorf("expected priority 100 (lower normalized), got %v", got)
 	}
 }
 
-func TestGuaranteedMinimum_HighPriorityWithGuarantee(t *testing.T) {
-	// test when the high priority band also has a guarantee
-	config := Config{
-		MinGuaranteedRates: map[int]float64{
-			100: 0.5, // online gets 50% minimum
-			50:  0.1, // batch gets 10% minimum
-		},
-	}
-
-	policy := newGuaranteedMinimum(config, "test")
-
-	// online has 40 (below 50%), batch has 5 (below 10%)
-	// normalized_online = 40/0.5 = 80
-	// normalized_batch = 5/0.1 = 50
-	// batch is more behind, but we compare against online's normalized
-	for i := 0; i < 40; i++ {
-		policy.OnDispatchComplete(100, 0)
-	}
-	for i := 0; i < 5; i++ {
-		policy.OnDispatchComplete(50, 0)
-	}
-
-	bands := []framework.PriorityBandAccessor{
-		&mockPriorityBand{
-			priority:     100,
-			priorityName: "online",
-			queues: []framework.FlowQueueAccessor{
-				&mockFlowQueue{flowKey: types.FlowKey{ID: "flow1", Priority: 100}, length: 1},
-			},
-		},
-		&mockPriorityBand{
-			priority:     50,
-			priorityName: "batch",
-			queues: []framework.FlowQueueAccessor{
-				&mockFlowQueue{flowKey: types.FlowKey{ID: "flow2", Priority: 50}, length: 1},
-			},
-		},
-	}
-
-	// batch (normalized=50) is behind online (normalized=80), so batch should be boosted
-	got, err := policy.SelectBand(bands)
-	if err != nil {
-		t.Fatalf("SelectBand returned error: %v", err)
-	}
-	if got == nil || got.Priority() != 50 {
-		t.Errorf("expected priority 50 (behind high priority), got %v", got)
-	}
-}
-
-func TestGuaranteedMinimum_EmptyBands(t *testing.T) {
-	policy := newGuaranteedMinimum(DefaultConfig(), "test")
+func TestWeightedPriority_EmptyBands(t *testing.T) {
+	policy := newWeightedPriority(DefaultConfig(), "test")
 
 	got, err := policy.SelectBand(nil)
 	if err != nil {
@@ -550,24 +496,25 @@ func TestGuaranteedMinimum_EmptyBands(t *testing.T) {
 	}
 }
 
-func TestGuaranteedMinimum_AllBandsEmpty(t *testing.T) {
+func TestWeightedPriority_AllBandsEmpty(t *testing.T) {
 	config := Config{
-		MinGuaranteedRates: map[int]float64{
-			50: 0.1,
+		Weights: map[int]float64{
+			100: 10.0,
+			50:  1.0,
 		},
 	}
 
-	policy := newGuaranteedMinimum(config, "test")
+	policy := newWeightedPriority(config, "test")
 
 	bands := []framework.PriorityBandAccessor{
 		&mockPriorityBand{
 			priority:     100,
-			priorityName: "online",
+			priorityName: "high",
 			queues:       []framework.FlowQueueAccessor{}, // no work
 		},
 		&mockPriorityBand{
 			priority:     50,
-			priorityName: "batch",
+			priorityName: "low",
 			queues:       []framework.FlowQueueAccessor{}, // no work
 		},
 	}
@@ -578,5 +525,58 @@ func TestGuaranteedMinimum_AllBandsEmpty(t *testing.T) {
 	}
 	if got != nil {
 		t.Errorf("expected nil when all bands have no work, got %v", got)
+	}
+}
+
+func TestWeightedPriority_ProportionalThroughput(t *testing.T) {
+	// verify that over many selections, throughput is proportional to weights
+	config := Config{
+		Weights: map[int]float64{
+			100: 10.0, // should get ~10x the throughput
+			50:  1.0,
+		},
+	}
+
+	policy := newWeightedPriority(config, "test")
+
+	bands := []framework.PriorityBandAccessor{
+		&mockPriorityBand{
+			priority:     100,
+			priorityName: "high",
+			queues: []framework.FlowQueueAccessor{
+				&mockFlowQueue{flowKey: types.FlowKey{ID: "flow1", Priority: 100}, length: 1},
+			},
+		},
+		&mockPriorityBand{
+			priority:     50,
+			priorityName: "low",
+			queues: []framework.FlowQueueAccessor{
+				&mockFlowQueue{flowKey: types.FlowKey{ID: "flow2", Priority: 50}, length: 1},
+			},
+		},
+	}
+
+	selections := make(map[int]int)
+	for i := 0; i < 110; i++ {
+		got, err := policy.SelectBand(bands)
+		if err != nil {
+			t.Fatalf("SelectBand returned error: %v", err)
+		}
+		if got != nil {
+			selections[got.Priority()]++
+			policy.OnDispatchComplete(got.Priority(), 0)
+		}
+	}
+
+	// with 10:1 weights, we expect ~100 high and ~10 low selections
+	highSelections := selections[100]
+	lowSelections := selections[50]
+
+	// allow some tolerance for rounding
+	if highSelections < 95 || highSelections > 105 {
+		t.Errorf("expected ~100 high priority selections, got %d", highSelections)
+	}
+	if lowSelections < 5 || lowSelections > 15 {
+		t.Errorf("expected ~10 low priority selections, got %d", lowSelections)
 	}
 }

@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package guaranteedminimum
+package weightedpriority
 
 import (
 	"strconv"
@@ -25,11 +25,6 @@ import (
 // recordDispatch records tokens and request count for a priority band.
 func recordDispatch(priority int, tokens uint64) {
 	metrics.RecordInterPriorityDispatch(strconv.Itoa(priority), tokens)
-}
-
-// recordStarvationIntervention records when a band is boosted due to starvation.
-func recordStarvationIntervention(priority int, priorityName string) {
-	metrics.RecordInterPriorityStarvationIntervention(strconv.Itoa(priority), priorityName)
 }
 
 // recordCounterState records the current VTC state for a priority band.

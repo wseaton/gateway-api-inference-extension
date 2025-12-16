@@ -14,26 +14,35 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package guaranteedminimum
+package weightedpriority
 
-// Config holds the configuration for the GuaranteedMinimum policy.
+// Config holds the configuration for the WeightedPriority policy.
 type Config struct {
-	// MinGuaranteedRates maps priority level to minimum guaranteed share (0.0-1.0).
-	// Bands not in this map have no minimum guarantee (strict priority only).
-	// Example: {10: 0.05} means priority 10 gets at least 5% of dispatches.
-	MinGuaranteedRates map[int]float64 `json:"minGuaranteedRates,omitempty"`
+	// Weights maps priority level to its dispatch weight.
+	// Higher weights receive proportionally more throughput.
+	// Bands not in this map get a default weight of 1.0.
+	// Example: {10: 10.0, 0: 1.0} means priority 10 gets ~10x the throughput of priority 0.
+	Weights map[int]float64 `json:"weights,omitempty"`
 }
 
 // DefaultConfig returns a Config with sensible defaults.
 func DefaultConfig() Config {
 	return Config{
-		MinGuaranteedRates: make(map[int]float64),
+		Weights: make(map[int]float64),
 	}
 }
 
 // Validate checks and applies defaults to the configuration.
 func (c *Config) Validate() {
-	if c.MinGuaranteedRates == nil {
-		c.MinGuaranteedRates = make(map[int]float64)
+	if c.Weights == nil {
+		c.Weights = make(map[int]float64)
 	}
+}
+
+// getWeight returns the configured weight for a priority, or 1.0 if not configured.
+func (c *Config) getWeight(priority int) float64 {
+	if weight, ok := c.Weights[priority]; ok && weight > 0 {
+		return weight
+	}
+	return 1.0
 }

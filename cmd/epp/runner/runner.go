@@ -658,7 +658,7 @@ type interPriorityCompletionListener interface {
 }
 
 // interPriorityCompletionAdapter adapts the inter-priority completion listener to requestcontrol.ResponseComplete.
-// bridges the inter-priority policy (GuaranteedMinimum) to the request control layer for VTC-style token accounting.
+// bridges the inter-priority policy (WeightedPriority) to the request control layer for VTC-style token accounting.
 type interPriorityCompletionAdapter struct {
 	listener interPriorityCompletionListener
 }
@@ -668,7 +668,7 @@ var _ requestcontrol.ResponseComplete = (*interPriorityCompletionAdapter)(nil)
 var _ requestcontrol.ResponseComplete = (*vtcCompletionAdapter)(nil)
 
 func (a *interPriorityCompletionAdapter) TypedName() plugins.TypedName {
-	return plugins.TypedName{Type: "InterPriorityCompletionAdapter", Name: "GuaranteedMinimum"}
+	return plugins.TypedName{Type: "InterPriorityCompletionAdapter", Name: "WeightedPriority"}
 }
 
 func (a *interPriorityCompletionAdapter) ResponseComplete(ctx context.Context, _ *schedulingtypes.LLMRequest, response *requestcontrol.Response, _ *backend.Pod) {

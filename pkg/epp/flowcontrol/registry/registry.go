@@ -622,21 +622,26 @@ func (fr *FlowRegistry) createInterPriorityPolicy(cfg *Config) (framework.InterP
 	policyName := string(cfg.InterPriorityDispatchPolicy)
 	policyParams := cfg.InterPriorityDispatchPolicyParams
 
-	// auto-generate default config for GuaranteedMinimum if none provided
-	if policyName == "GuaranteedMinimum" && len(policyParams) == 0 {
-		lowestPriority := findLowestPriorityFromBands(cfg.PriorityBands)
+	// auto-generate default config for WeightedPriority if none provided
+	if policyName == "WeightedPriority" && len(policyParams) == 0 {
+		weights := make(map[string]float64)
+		for _, band := range cfg.PriorityBands {
+			weight := float64(band.Priority)
+			if weight < 1.0 {
+				weight = 1.0 // floor at 1.0 to avoid division issues
+			}
+			weights[fmt.Sprintf("%d", band.Priority)] = weight
+		}
 		defaultConfig := map[string]any{
-			"minGuaranteedRates": map[string]float64{
-				fmt.Sprintf("%d", lowestPriority): 0.05,
-			},
+			"weights": weights,
 		}
 		var err error
 		policyParams, err = json.Marshal(defaultConfig)
 		if err != nil {
-			return nil, fmt.Errorf("failed to marshal default GuaranteedMinimum config: %w", err)
+			return nil, fmt.Errorf("failed to marshal default WeightedPriority config: %w", err)
 		}
-		fr.logger.Info("Auto-configured GuaranteedMinimum with 5% minimum for lowest priority band",
-			"lowestPriority", lowestPriority)
+		fr.logger.Info("Auto-configured WeightedPriority with priority-based weights",
+			"weights", weights)
 	}
 
 	fr.logger.Info("Instantiating shared InterPriorityDispatchPolicy",
@@ -665,18 +670,4 @@ func (fr *FlowRegistry) OnRequestComplete(priority int, cost uint64) {
 // InterPriorityDispatchPolicy returns the shared inter-priority dispatch policy.
 func (fr *FlowRegistry) InterPriorityDispatchPolicy() framework.InterPriorityDispatchPolicy {
 	return fr.interPriorityPolicy
-}
-
-// findLowestPriorityFromBands returns the lowest priority value from global config bands.
-func findLowestPriorityFromBands(bands []PriorityBandConfig) int {
-	if len(bands) == 0 {
-		return 0
-	}
-	lowest := bands[0].Priority
-	for _, band := range bands[1:] {
-		if band.Priority < lowest {
-			lowest = band.Priority
-		}
-	}
-	return lowest
 }
