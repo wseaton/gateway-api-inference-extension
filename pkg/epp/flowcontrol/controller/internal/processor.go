@@ -330,6 +330,9 @@ func (sp *ShardProcessor) dispatchCycle(ctx context.Context) bool {
 	}
 
 	// --- Dispatch ---
+	sp.logger.V(logutil.TRACE).Info("Dispatching request",
+		"reqID", req.ID(), "flowID", req.FlowKey().ID, "priority", selectedBand.Priority(),
+		"priorityName", selectedBand.PriorityName())
 	if err := sp.dispatchItem(item); err != nil {
 		sp.logger.Error(err, "Failed to dispatch item",
 			"flowKey", req.FlowKey(), "reqID", req.ID(), "priorityName", selectedBand.PriorityName())

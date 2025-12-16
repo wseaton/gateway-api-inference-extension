@@ -156,6 +156,9 @@ func (p *guaranteedMinimum) SelectBand(bands []framework.PriorityBandAccessor) (
 	// phase 2: no starvation, use strict priority (highest with work wins)
 	for _, band := range bands {
 		if bandHasWork(band) {
+			logger.V(logutil.TRACE).Info("selecting band via strict priority",
+				"priority", band.Priority(),
+				"priorityName", band.PriorityName())
 			return band, nil
 		}
 	}
@@ -179,6 +182,16 @@ func (p *guaranteedMinimum) OnDispatchComplete(priority int, _ uint64) {
 	p.grandTotal++
 
 	recordDispatch(priority)
+
+	// log rate info at trace level for debugging priority dispatch
+	if logger.V(logutil.TRACE).Enabled() {
+		rate := p.rateForPriority(priority)
+		logger.V(logutil.TRACE).Info("dispatch recorded",
+			"priority", priority,
+			"dispatchCount", p.totalCounts[priority],
+			"grandTotal", p.grandTotal,
+			"currentRate", rate)
+	}
 }
 
 // advanceBuckets rotates the circular buffer if enough time has passed.
