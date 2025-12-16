@@ -28,7 +28,6 @@ import (
 
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/framework"
 	dispatch "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/framework/plugins/policies/interpriority/dispatch"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metrics"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
 )
@@ -39,7 +38,6 @@ const GuaranteedMinimumPolicyName dispatch.RegisteredPolicyName = "GuaranteedMin
 var logger = ctrl.Log.WithName("guaranteed-minimum-policy")
 
 func init() {
-	metrics.Register(allMetrics()...)
 	dispatch.MustRegisterPolicy(GuaranteedMinimumPolicyName, func() (framework.InterPriorityDispatchPolicy, error) {
 		return newGuaranteedMinimum(DefaultConfig(), string(GuaranteedMinimumPolicyName)), nil
 	})

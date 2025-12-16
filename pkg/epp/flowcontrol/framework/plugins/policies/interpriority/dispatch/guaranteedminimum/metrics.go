@@ -19,94 +19,20 @@ package guaranteedminimum
 import (
 	"strconv"
 
-	"github.com/prometheus/client_golang/prometheus"
-	compbasemetrics "k8s.io/component-base/metrics"
-
-	metricsutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/metrics"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metrics"
 )
 
-const metricsSubsystem = "inference_extension"
-
-var (
-	priorityBandTokensTotal = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Subsystem: metricsSubsystem,
-			Name:      "inter_priority_tokens_total",
-			Help:      metricsutil.HelpMsgWithStability("Total tokens (input + output) processed per priority band.", compbasemetrics.ALPHA),
-		},
-		[]string{"priority"},
-	)
-
-	priorityBandRequestsTotal = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Subsystem: metricsSubsystem,
-			Name:      "inter_priority_requests_total",
-			Help:      metricsutil.HelpMsgWithStability("Total requests completed per priority band.", compbasemetrics.ALPHA),
-		},
-		[]string{"priority"},
-	)
-
-	starvationInterventionsTotal = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Subsystem: metricsSubsystem,
-			Name:      "inter_priority_starvation_interventions_total",
-			Help:      metricsutil.HelpMsgWithStability("Total number of times a band was selected due to being below its minimum guarantee.", compbasemetrics.ALPHA),
-		},
-		[]string{"priority", "priority_name"},
-	)
-
-	// gauges for observing VTC state
-	priorityBandCounter = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Subsystem: metricsSubsystem,
-			Name:      "inter_priority_counter",
-			Help:      metricsutil.HelpMsgWithStability("Current VTC counter value (cumulative tokens) per priority band.", compbasemetrics.ALPHA),
-		},
-		[]string{"priority"},
-	)
-
-	priorityBandNormalizedCounter = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Subsystem: metricsSubsystem,
-			Name:      "inter_priority_normalized_counter",
-			Help:      metricsutil.HelpMsgWithStability("Current normalized VTC counter (counter/minRate) per priority band. Lower values indicate the band is behind.", compbasemetrics.ALPHA),
-		},
-		[]string{"priority"},
-	)
-
-	priorityBandDeficit = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Subsystem: metricsSubsystem,
-			Name:      "inter_priority_deficit",
-			Help:      metricsutil.HelpMsgWithStability("Deficit of a guaranteed band relative to the highest priority band. Positive means behind, zero means caught up.", compbasemetrics.ALPHA),
-		},
-		[]string{"priority"},
-	)
-)
-
-func allMetrics() []prometheus.Collector {
-	return []prometheus.Collector{
-		priorityBandTokensTotal,
-		priorityBandRequestsTotal,
-		starvationInterventionsTotal,
-		priorityBandCounter,
-		priorityBandNormalizedCounter,
-		priorityBandDeficit,
-	}
-}
-
+// recordDispatch records tokens and request count for a priority band.
 func recordDispatch(priority int, tokens uint64) {
-	priorityBandTokensTotal.WithLabelValues(strconv.Itoa(priority)).Add(float64(tokens))
-	priorityBandRequestsTotal.WithLabelValues(strconv.Itoa(priority)).Inc()
+	metrics.RecordInterPriorityDispatch(strconv.Itoa(priority), tokens)
 }
 
+// recordStarvationIntervention records when a band is boosted due to starvation.
 func recordStarvationIntervention(priority int, priorityName string) {
-	starvationInterventionsTotal.WithLabelValues(strconv.Itoa(priority), priorityName).Inc()
+	metrics.RecordInterPriorityStarvationIntervention(strconv.Itoa(priority), priorityName)
 }
 
+// recordCounterState records the current VTC state for a priority band.
 func recordCounterState(priority int, counter float64, normalized float64, deficit float64) {
-	priStr := strconv.Itoa(priority)
-	priorityBandCounter.WithLabelValues(priStr).Set(counter)
-	priorityBandNormalizedCounter.WithLabelValues(priStr).Set(normalized)
-	priorityBandDeficit.WithLabelValues(priStr).Set(deficit)
+	metrics.RecordInterPriorityCounterState(strconv.Itoa(priority), counter, normalized, deficit)
 }

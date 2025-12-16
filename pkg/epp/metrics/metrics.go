@@ -330,6 +330,61 @@ var (
 			Help:      metricsutil.HelpMsgWithStability("Total number of stale flows cleaned up by VTC policy.", compbasemetrics.ALPHA),
 		},
 	)
+
+	// Inter-Priority (GuaranteedMinimum) Policy Metrics
+	interPriorityTokensTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Subsystem: InferenceExtension,
+			Name:      "inter_priority_tokens_total",
+			Help:      metricsutil.HelpMsgWithStability("Total tokens (input + output) processed per priority band.", compbasemetrics.ALPHA),
+		},
+		[]string{"priority"},
+	)
+
+	interPriorityRequestsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Subsystem: InferenceExtension,
+			Name:      "inter_priority_requests_total",
+			Help:      metricsutil.HelpMsgWithStability("Total requests completed per priority band.", compbasemetrics.ALPHA),
+		},
+		[]string{"priority"},
+	)
+
+	interPriorityStarvationInterventions = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Subsystem: InferenceExtension,
+			Name:      "inter_priority_starvation_interventions_total",
+			Help:      metricsutil.HelpMsgWithStability("Total times a band was selected due to being below its minimum guarantee.", compbasemetrics.ALPHA),
+		},
+		[]string{"priority", "priority_name"},
+	)
+
+	interPriorityCounter = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Subsystem: InferenceExtension,
+			Name:      "inter_priority_counter",
+			Help:      metricsutil.HelpMsgWithStability("Current VTC counter value (cumulative tokens) per priority band.", compbasemetrics.ALPHA),
+		},
+		[]string{"priority"},
+	)
+
+	interPriorityNormalizedCounter = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Subsystem: InferenceExtension,
+			Name:      "inter_priority_normalized_counter",
+			Help:      metricsutil.HelpMsgWithStability("Current normalized VTC counter (counter/minRate) per priority band.", compbasemetrics.ALPHA),
+		},
+		[]string{"priority"},
+	)
+
+	interPriorityDeficit = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Subsystem: InferenceExtension,
+			Name:      "inter_priority_deficit",
+			Help:      metricsutil.HelpMsgWithStability("Deficit of a guaranteed band relative to highest priority. Positive means behind.", compbasemetrics.ALPHA),
+		},
+		[]string{"priority"},
+	)
 )
 
 var registerMetrics sync.Once
@@ -360,6 +415,13 @@ func Register(customCollectors ...prometheus.Collector) {
 		metrics.Registry.MustRegister(flowControlQueueSize)
 		metrics.Registry.MustRegister(flowControlSaturationBlocks)
 		metrics.Registry.MustRegister(flowControlDispatches)
+		// Inter-Priority metrics
+		metrics.Registry.MustRegister(interPriorityTokensTotal)
+		metrics.Registry.MustRegister(interPriorityRequestsTotal)
+		metrics.Registry.MustRegister(interPriorityStarvationInterventions)
+		metrics.Registry.MustRegister(interPriorityCounter)
+		metrics.Registry.MustRegister(interPriorityNormalizedCounter)
+		metrics.Registry.MustRegister(interPriorityDeficit)
 		for _, collector := range customCollectors {
 			metrics.Registry.MustRegister(collector)
 		}
@@ -546,4 +608,22 @@ func RecordFlowControlSaturationBlock(priority string) {
 // RecordFlowControlDispatch increments the counter when a request is dispatched.
 func RecordFlowControlDispatch(priority string) {
 	flowControlDispatches.WithLabelValues(priority).Inc()
+}
+
+// RecordInterPriorityDispatch records a dispatch for inter-priority tracking.
+func RecordInterPriorityDispatch(priority string, tokens uint64) {
+	interPriorityTokensTotal.WithLabelValues(priority).Add(float64(tokens))
+	interPriorityRequestsTotal.WithLabelValues(priority).Inc()
+}
+
+// RecordInterPriorityStarvationIntervention records when a band is boosted due to starvation.
+func RecordInterPriorityStarvationIntervention(priority, priorityName string) {
+	interPriorityStarvationInterventions.WithLabelValues(priority, priorityName).Inc()
+}
+
+// RecordInterPriorityCounterState records the current VTC state for a priority band.
+func RecordInterPriorityCounterState(priority string, counter, normalized, deficit float64) {
+	interPriorityCounter.WithLabelValues(priority).Set(counter)
+	interPriorityNormalizedCounter.WithLabelValues(priority).Set(normalized)
+	interPriorityDeficit.WithLabelValues(priority).Set(deficit)
 }
