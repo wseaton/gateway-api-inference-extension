@@ -19,6 +19,7 @@ package registry
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"sync"
@@ -114,6 +115,10 @@ type FlowRegistry struct {
 	clock  clock.WithTicker
 	handle plugins.Handle
 
+	// interPriorityPolicy is the shared policy for selecting which priority band to service next.
+	// this is a singleton shared across all shards to enable global fairness guarantees.
+	interPriorityPolicy framework.InterPriorityDispatchPolicy
+
 	// --- Lock-free / Concurrent state (hot path) ---
 
 	// flowStates tracks all flow instances, keyed by `types.FlowKey`.
@@ -171,6 +176,13 @@ func NewFlowRegistry(config Config, logger logr.Logger, handle plugins.Handle, o
 		band := &config.PriorityBands[i]
 		fr.perPriorityBandStats[band.Priority] = &bandStats{}
 	}
+
+	// create the shared InterPriorityDispatchPolicy (singleton for global fairness)
+	policy, err := fr.createInterPriorityPolicy(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create inter-priority policy: %w", err)
+	}
+	fr.interPriorityPolicy = policy
 
 	if err := fr.updateShardCount(cfg.InitialShardCount); err != nil {
 		return nil, fmt.Errorf("failed to initialize shards: %w", err)
@@ -468,6 +480,7 @@ func (fr *FlowRegistry) executeScaleUpLocked(newTotalActive int) error {
 			partitionedConfig,
 			fr.logger,
 			fr.propagateStatsDelta,
+			fr.interPriorityPolicy,
 			fr.handle,
 		)
 		if err != nil {
@@ -601,4 +614,69 @@ func (fr *FlowRegistry) propagateStatsDelta(priority int, lenDelta, byteSizeDelt
 	stats.byteSize.Add(byteSizeDelta)
 	fr.totalLen.Add(lenDelta)
 	fr.totalByteSize.Add(byteSizeDelta)
+}
+
+// createInterPriorityPolicy instantiates the shared InterPriorityDispatchPolicy.
+// this policy is a singleton shared across all shards for global fairness.
+func (fr *FlowRegistry) createInterPriorityPolicy(cfg *Config) (framework.InterPriorityDispatchPolicy, error) {
+	policyName := string(cfg.InterPriorityDispatchPolicy)
+	policyParams := cfg.InterPriorityDispatchPolicyParams
+
+	// auto-generate default config for GuaranteedMinimum if none provided
+	if policyName == "GuaranteedMinimum" && len(policyParams) == 0 {
+		lowestPriority := findLowestPriorityFromBands(cfg.PriorityBands)
+		defaultConfig := map[string]any{
+			"minGuaranteedRates": map[string]float64{
+				fmt.Sprintf("%d", lowestPriority): 0.05,
+			},
+		}
+		var err error
+		policyParams, err = json.Marshal(defaultConfig)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal default GuaranteedMinimum config: %w", err)
+		}
+		fr.logger.Info("Auto-configured GuaranteedMinimum with 5% minimum for lowest priority band",
+			"lowestPriority", lowestPriority)
+	}
+
+	fr.logger.Info("Instantiating shared InterPriorityDispatchPolicy",
+		"policyName", policyName,
+		"config", string(policyParams))
+
+	plugin, err := cfg.interPriorityFactory(policyName, policyParams, fr.handle)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create inter-priority policy %q: %w", policyName, err)
+	}
+
+	policy, ok := plugin.(framework.InterPriorityDispatchPolicy)
+	if !ok {
+		return nil, fmt.Errorf("plugin %q is not a valid InterPriorityDispatchPolicy", policyName)
+	}
+
+	return policy, nil
+}
+
+// OnRequestComplete records the completion of a request for VTC-style fairness accounting.
+// this should be called after a request completes with the actual token cost (input + output).
+func (fr *FlowRegistry) OnRequestComplete(priority int, cost uint64) {
+	fr.interPriorityPolicy.OnDispatchComplete(priority, cost)
+}
+
+// InterPriorityDispatchPolicy returns the shared inter-priority dispatch policy.
+func (fr *FlowRegistry) InterPriorityDispatchPolicy() framework.InterPriorityDispatchPolicy {
+	return fr.interPriorityPolicy
+}
+
+// findLowestPriorityFromBands returns the lowest priority value from global config bands.
+func findLowestPriorityFromBands(bands []PriorityBandConfig) int {
+	if len(bands) == 0 {
+		return 0
+	}
+	lowest := bands[0].Priority
+	for _, band := range bands[1:] {
+		if band.Priority < lowest {
+			lowest = band.Priority
+		}
+	}
+	return lowest
 }

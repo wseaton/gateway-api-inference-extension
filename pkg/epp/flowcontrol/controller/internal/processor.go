@@ -342,9 +342,8 @@ func (sp *ShardProcessor) dispatchCycle(ctx context.Context) bool {
 		return false
 	}
 
-	// record metrics and notify the policy of successful dispatch
+	// record metrics (token cost is recorded at response completion via OnRequestComplete)
 	metrics.RecordFlowControlDispatch(strconv.Itoa(selectedBand.Priority()))
-	interPriorityPolicy.OnDispatchComplete(selectedBand.Priority(), req.ByteSize())
 	return true
 }
 

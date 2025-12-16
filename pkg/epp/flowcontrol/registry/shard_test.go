@@ -27,6 +27,7 @@ import (
 
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/contracts"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/framework"
+	frameworkmocks "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/framework/mocks"
 	_ "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/framework/plugins/policies/interflow/dispatch/besthead"
 	intra "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/framework/plugins/policies/intraflow/dispatch"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/framework/plugins/queue"
@@ -68,10 +69,12 @@ func newShardTestHarness(t *testing.T) *shardTestHarness {
 
 	statsPropagator := &mockStatsPropagator{}
 	shardConfig := globalConfig.partition(0, 1)
+	mockPolicy := &frameworkmocks.MockInterPriorityDispatchPolicy{}
 	shard, err := newShard(
 		"test-shard-1",
 		shardConfig, logr.Discard(),
 		statsPropagator.propagate,
+		mockPolicy,
 		nil, // handle
 	)
 	require.NoError(t, err, "Test setup: newShard should not return an error with valid configuration")

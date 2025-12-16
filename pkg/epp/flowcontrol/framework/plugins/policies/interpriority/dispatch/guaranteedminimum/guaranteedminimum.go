@@ -15,13 +15,14 @@ limitations under the License.
 */
 
 // Package guaranteedminimum provides a `framework.InterPriorityDispatchPolicy` that ensures each
-// priority band receives at least its configured minimum share of dispatches over a sliding window.
+// priority band receives at least its configured minimum share of dispatches using VTC-style
+// cumulative counters.
 package guaranteedminimum
 
 import (
 	"encoding/json"
+	"math"
 	"sync"
-	"time"
 
 	ctrl "sigs.k8s.io/controller-runtime"
 
@@ -57,49 +58,24 @@ func newGuaranteedMinimumFactory(name string, rawConfig json.RawMessage, _ plugi
 	return newGuaranteedMinimum(config, name), nil
 }
 
-// guaranteedMinimum implements `framework.InterPriorityDispatchPolicy` with minimum guarantees.
-// It tracks dispatch counts in a circular buffer to calculate rates over a sliding window,
-// ensuring lower-priority bands receive at least their configured minimum share.
+// guaranteedMinimum implements `framework.InterPriorityDispatchPolicy` with minimum guarantees
+// using VTC-style cumulative counters. A band with a minimum guarantee is "behind" if its
+// normalized counter (tokens/minRate) is lower than the strict priority band's.
 type guaranteedMinimum struct {
 	typedName plugins.TypedName
 	config    Config
-	clock     func() time.Time
 
-	mu            sync.Mutex
-	buckets       []bucket          // circular buffer of time buckets
-	currentBucket int               // index of the current bucket
-	bucketStart   time.Time         // start time of current bucket
-	totalCounts   map[int]uint64    // running total per priority across all buckets
-	grandTotal    uint64            // running total across all priorities
-}
-
-// bucket holds dispatch counts for a single time slice.
-type bucket struct {
-	counts map[int]uint64 // priority -> dispatch count in this bucket
-	total  uint64         // total dispatches in this bucket
+	mu       sync.Mutex
+	counters map[int]float64 // cumulative tokens per priority
 }
 
 func newGuaranteedMinimum(config Config, name string) *guaranteedMinimum {
-	return newGuaranteedMinimumWithClock(config, name, time.Now)
-}
-
-func newGuaranteedMinimumWithClock(config Config, name string, clock func() time.Time) *guaranteedMinimum {
 	config.Validate()
 
-	buckets := make([]bucket, config.BucketCount)
-	for i := range buckets {
-		buckets[i] = bucket{counts: make(map[int]uint64)}
-	}
-
 	return &guaranteedMinimum{
-		typedName:     plugins.TypedName{Type: framework.InterPriorityDispatchPolicyType, Name: name},
-		config:        config,
-		clock:         clock,
-		buckets:       buckets,
-		currentBucket: 0,
-		bucketStart:   clock(),
-		totalCounts:   make(map[int]uint64),
-		grandTotal:    0,
+		typedName: plugins.TypedName{Type: framework.InterPriorityDispatchPolicyType, Name: name},
+		config:    config,
+		counters:  make(map[int]float64),
 	}
 }
 
@@ -109,19 +85,44 @@ func (p *guaranteedMinimum) TypedName() plugins.TypedName {
 }
 
 // SelectBand chooses which priority band should get the next dispatch slot.
-// It first checks if any band with a minimum guarantee is below its target rate.
-// If so, the most starved band is selected. Otherwise, strict priority applies.
+// It uses VTC-style normalized counters to detect starvation: a guaranteed band
+// is "behind" if counters[band]/minRate < counters[strictPriority]/rate.
+// If a guaranteed band is behind, it gets the dispatch; otherwise strict priority applies.
 func (p *guaranteedMinimum) SelectBand(bands []framework.PriorityBandAccessor) (framework.PriorityBandAccessor, error) {
 	if len(bands) == 0 {
 		return nil, nil
 	}
 
 	p.mu.Lock()
-	p.advanceBuckets()
+	defer p.mu.Unlock()
 
-	// phase 1: find the most starved band (largest deficit below minimum)
-	var starvedBand framework.PriorityBandAccessor
-	var largestDeficit float64
+	// find highest priority band with work (strict priority winner)
+	var strictPriorityBand framework.PriorityBandAccessor
+	for _, band := range bands {
+		if bandHasWork(band) {
+			strictPriorityBand = band
+			break
+		}
+	}
+
+	if strictPriorityBand == nil {
+		return nil, nil
+	}
+
+	// calculate strict priority band's normalized counter
+	strictPri := strictPriorityBand.Priority()
+	strictMinRate, strictHasGuarantee := p.config.MinGuaranteedRates[strictPri]
+	var strictNormalized float64
+	if strictHasGuarantee && strictMinRate > 0 {
+		strictNormalized = p.counters[strictPri] / strictMinRate
+	} else {
+		// no guarantee means implicit rate of 1.0
+		strictNormalized = p.counters[strictPri]
+	}
+
+	// find the most behind guaranteed band that is behind the strict priority band
+	var mostBehindBand framework.PriorityBandAccessor
+	lowestNormalized := math.MaxFloat64
 
 	for _, band := range bands {
 		if !bandHasWork(band) {
@@ -134,113 +135,103 @@ func (p *guaranteedMinimum) SelectBand(bands []framework.PriorityBandAccessor) (
 			continue
 		}
 
-		actualRate := p.rateForPriority(pri)
-		deficit := minRate - actualRate
-
-		if deficit > 0 && deficit > largestDeficit {
-			starvedBand = band
-			largestDeficit = deficit
-		}
-	}
-	p.mu.Unlock()
-
-	if starvedBand != nil {
-		recordStarvationIntervention(starvedBand.Priority(), starvedBand.PriorityName())
-		logger.V(logutil.DEBUG).Info("selecting starved band",
-			"priority", starvedBand.Priority(),
-			"priorityName", starvedBand.PriorityName(),
-			"deficit", largestDeficit)
-		return starvedBand, nil
-	}
-
-	// phase 2: no starvation, use strict priority (highest with work wins)
-	for _, band := range bands {
-		if bandHasWork(band) {
-			logger.V(logutil.TRACE).Info("selecting band via strict priority",
-				"priority", band.Priority(),
-				"priorityName", band.PriorityName())
-			return band, nil
+		normalized := p.counters[pri] / minRate
+		if normalized < strictNormalized && normalized < lowestNormalized {
+			lowestNormalized = normalized
+			mostBehindBand = band
 		}
 	}
 
-	return nil, nil
+	if mostBehindBand != nil {
+		recordStarvationIntervention(mostBehindBand.Priority(), mostBehindBand.PriorityName())
+		logger.V(logutil.DEBUG).Info("selecting behind band",
+			"priority", mostBehindBand.Priority(),
+			"priorityName", mostBehindBand.PriorityName(),
+			"normalized", lowestNormalized,
+			"strictNormalized", strictNormalized)
+		return mostBehindBand, nil
+	}
+
+	logger.V(logutil.TRACE).Info("selecting band via strict priority",
+		"priority", strictPriorityBand.Priority(),
+		"priorityName", strictPriorityBand.PriorityName())
+	return strictPriorityBand, nil
 }
 
-// OnDispatchComplete records a dispatch for rate tracking.
-func (p *guaranteedMinimum) OnDispatchComplete(priority int, _ uint64) {
+// OnDispatchComplete records a dispatch by incrementing the cumulative counter.
+func (p *guaranteedMinimum) OnDispatchComplete(priority int, cost uint64) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	p.advanceBuckets()
+	// use cost if provided, otherwise count as 1
+	increment := float64(cost)
+	if cost == 0 {
+		increment = 1
+	}
+	p.counters[priority] += increment
 
-	// increment current bucket
-	p.buckets[p.currentBucket].counts[priority]++
-	p.buckets[p.currentBucket].total++
+	// record metrics
+	recordDispatch(priority, cost)
+	p.updateCounterMetricsLocked(priority)
 
-	// update running totals
-	p.totalCounts[priority]++
-	p.grandTotal++
-
-	recordDispatch(priority)
-
-	// log rate info at trace level for debugging priority dispatch
 	if logger.V(logutil.TRACE).Enabled() {
-		rate := p.rateForPriority(priority)
 		logger.V(logutil.TRACE).Info("dispatch recorded",
 			"priority", priority,
-			"dispatchCount", p.totalCounts[priority],
-			"grandTotal", p.grandTotal,
-			"currentRate", rate)
+			"cost", cost,
+			"counter", p.counters[priority])
 	}
 }
 
-// advanceBuckets rotates the circular buffer if enough time has passed.
-// caller must hold p.mu.
-func (p *guaranteedMinimum) advanceBuckets() {
-	now := p.clock()
-	bucketDuration := p.config.BucketDuration()
+// updateCounterMetricsLocked updates the gauge metrics for a priority band.
+// must be called with p.mu held.
+func (p *guaranteedMinimum) updateCounterMetricsLocked(priority int) {
+	counter := p.counters[priority]
 
-	for now.Sub(p.bucketStart) >= bucketDuration {
-		// move to next bucket
-		p.currentBucket = (p.currentBucket + 1) % len(p.buckets)
+	// calculate normalized counter
+	var normalized float64
+	minRate, hasGuarantee := p.config.MinGuaranteedRates[priority]
+	if hasGuarantee && minRate > 0 {
+		normalized = counter / minRate
+	} else {
+		normalized = counter // implicit rate of 1.0
+	}
 
-		// subtract the old bucket's counts from running totals before clearing
-		oldBucket := &p.buckets[p.currentBucket]
-		for pri, count := range oldBucket.counts {
-			p.totalCounts[pri] -= count
+	// calculate deficit relative to highest counter
+	// find max normalized across all priorities
+	var maxNormalized float64
+	for pri, cnt := range p.counters {
+		rate, hasRate := p.config.MinGuaranteedRates[pri]
+		var norm float64
+		if hasRate && rate > 0 {
+			norm = cnt / rate
+		} else {
+			norm = cnt
 		}
-		p.grandTotal -= oldBucket.total
-
-		// clear the bucket for reuse
-		oldBucket.counts = make(map[int]uint64)
-		oldBucket.total = 0
-
-		p.bucketStart = p.bucketStart.Add(bucketDuration)
+		if norm > maxNormalized {
+			maxNormalized = norm
+		}
 	}
-}
 
-// rateForPriority calculates the dispatch rate for a priority over the sliding window.
-// caller must hold p.mu.
-func (p *guaranteedMinimum) rateForPriority(priority int) float64 {
-	if p.grandTotal == 0 {
-		return 0
+	// deficit is how far behind this band is (positive = behind, 0 = caught up)
+	deficit := maxNormalized - normalized
+	if deficit < 0 {
+		deficit = 0
 	}
-	return float64(p.totalCounts[priority]) / float64(p.grandTotal)
+
+	recordCounterState(priority, counter, normalized, deficit)
 }
 
 // GetStats returns current dispatch statistics for observability.
-// This is goroutine-safe.
-func (p *guaranteedMinimum) GetStats() (rates map[int]float64, total uint64) {
+func (p *guaranteedMinimum) GetStats() (counters map[int]float64, total float64) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	p.advanceBuckets()
-
-	rates = make(map[int]float64, len(p.totalCounts))
-	for pri := range p.totalCounts {
-		rates[pri] = p.rateForPriority(pri)
+	counters = make(map[int]float64, len(p.counters))
+	for pri, count := range p.counters {
+		counters[pri] = count
+		total += count
 	}
-	return rates, p.grandTotal
+	return counters, total
 }
 
 // bandHasWork returns true if the band has at least one queue with items.

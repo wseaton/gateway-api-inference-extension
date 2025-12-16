@@ -27,11 +27,20 @@ const (
 )
 
 var (
-	priorityBandDispatchesTotal = prometheus.NewCounterVec(
+	priorityBandTokensTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Subsystem: metricsSubsystem,
-			Name:      "dispatches_total",
-			Help:      "Total number of dispatches per priority band.",
+			Name:      "tokens_total",
+			Help:      "Total tokens (input + output) processed per priority band.",
+		},
+		[]string{"priority"},
+	)
+
+	priorityBandRequestsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Subsystem: metricsSubsystem,
+			Name:      "requests_total",
+			Help:      "Total requests completed per priority band.",
 		},
 		[]string{"priority"},
 	)
@@ -44,19 +53,59 @@ var (
 		},
 		[]string{"priority", "priority_name"},
 	)
+
+	// gauges for observing VTC state
+	priorityBandCounter = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Subsystem: metricsSubsystem,
+			Name:      "counter",
+			Help:      "Current VTC counter value (cumulative tokens) per priority band.",
+		},
+		[]string{"priority"},
+	)
+
+	priorityBandNormalizedCounter = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Subsystem: metricsSubsystem,
+			Name:      "normalized_counter",
+			Help:      "Current normalized VTC counter (counter/minRate) per priority band. Lower values indicate the band is behind.",
+		},
+		[]string{"priority"},
+	)
+
+	priorityBandDeficit = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Subsystem: metricsSubsystem,
+			Name:      "deficit",
+			Help:      "Deficit of a guaranteed band relative to the highest priority band. Positive means behind, zero means caught up.",
+		},
+		[]string{"priority"},
+	)
 )
 
 func allMetrics() []prometheus.Collector {
 	return []prometheus.Collector{
-		priorityBandDispatchesTotal,
+		priorityBandTokensTotal,
+		priorityBandRequestsTotal,
 		starvationInterventionsTotal,
+		priorityBandCounter,
+		priorityBandNormalizedCounter,
+		priorityBandDeficit,
 	}
 }
 
-func recordDispatch(priority int) {
-	priorityBandDispatchesTotal.WithLabelValues(strconv.Itoa(priority)).Inc()
+func recordDispatch(priority int, tokens uint64) {
+	priorityBandTokensTotal.WithLabelValues(strconv.Itoa(priority)).Add(float64(tokens))
+	priorityBandRequestsTotal.WithLabelValues(strconv.Itoa(priority)).Inc()
 }
 
 func recordStarvationIntervention(priority int, priorityName string) {
 	starvationInterventionsTotal.WithLabelValues(strconv.Itoa(priority), priorityName).Inc()
+}
+
+func recordCounterState(priority int, counter float64, normalized float64, deficit float64) {
+	priStr := strconv.Itoa(priority)
+	priorityBandCounter.WithLabelValues(priStr).Set(counter)
+	priorityBandNormalizedCounter.WithLabelValues(priStr).Set(normalized)
+	priorityBandDeficit.WithLabelValues(priStr).Set(deficit)
 }

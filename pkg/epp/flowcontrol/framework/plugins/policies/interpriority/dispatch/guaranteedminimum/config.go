@@ -16,21 +16,10 @@ limitations under the License.
 
 package guaranteedminimum
 
-import "time"
-
 // Config holds the configuration for the GuaranteedMinimum policy.
 type Config struct {
-	// WindowSize is the total duration over which dispatch rates are measured.
-	// Default: 30s
-	WindowSize time.Duration `json:"windowSize,omitempty"`
-
-	// BucketCount is the number of time buckets in the circular buffer.
-	// Each bucket represents WindowSize/BucketCount duration.
-	// Default: 30 (so with default WindowSize, each bucket is 1 second)
-	BucketCount int `json:"bucketCount,omitempty"`
-
 	// MinGuaranteedRates maps priority level to minimum guaranteed share (0.0-1.0).
-	// Bands not in this map have no minimum guarantee.
+	// Bands not in this map have no minimum guarantee (strict priority only).
 	// Example: {10: 0.05} means priority 10 gets at least 5% of dispatches.
 	MinGuaranteedRates map[int]float64 `json:"minGuaranteedRates,omitempty"`
 }
@@ -38,26 +27,13 @@ type Config struct {
 // DefaultConfig returns a Config with sensible defaults.
 func DefaultConfig() Config {
 	return Config{
-		WindowSize:         30 * time.Second,
-		BucketCount:        30,
 		MinGuaranteedRates: make(map[int]float64),
 	}
 }
 
 // Validate checks and applies defaults to the configuration.
 func (c *Config) Validate() {
-	if c.WindowSize <= 0 {
-		c.WindowSize = DefaultConfig().WindowSize
-	}
-	if c.BucketCount <= 0 {
-		c.BucketCount = DefaultConfig().BucketCount
-	}
 	if c.MinGuaranteedRates == nil {
 		c.MinGuaranteedRates = make(map[int]float64)
 	}
-}
-
-// BucketDuration returns the duration each bucket represents.
-func (c *Config) BucketDuration() time.Duration {
-	return c.WindowSize / time.Duration(c.BucketCount)
 }

@@ -353,9 +353,13 @@ func (r *Runner) Run(ctx context.Context) error {
 		go registry.Run(ctx)
 		admissionController = requestcontrol.NewFlowControlAdmissionController(saturationDetector, fc)
 
-		// wire VTC completion listener to update counters on request completion
+		// wire VTC completion listener to update counters on request completion (inter-flow fairness)
 		vtcAdapter := &vtcCompletionAdapter{listener: vtc.GetGlobalCompletionListener()}
 		r.requestControlConfig.AddPlugins(vtcAdapter)
+
+		// wire inter-priority completion listener for VTC-style token accounting (inter-priority fairness)
+		interPriorityAdapter := &interPriorityCompletionAdapter{listener: registry}
+		r.requestControlConfig.AddPlugins(interPriorityAdapter)
 	} else {
 		setupLog.Info("Experimental Flow Control layer is disabled, using legacy admission control")
 		admissionController = requestcontrol.NewLegacyAdmissionController(saturationDetector)
@@ -646,4 +650,27 @@ func (a *vtcCompletionAdapter) ResponseComplete(_ context.Context, _ *scheduling
 		return
 	}
 	a.listener.OnRequestComplete(flowID, response.Priority, response.Usage.PromptTokens, response.Usage.CompletionTokens)
+}
+
+// interPriorityCompletionListener is called when a request completes to update inter-priority counters.
+type interPriorityCompletionListener interface {
+	OnRequestComplete(priority int, cost uint64)
+}
+
+// interPriorityCompletionAdapter adapts the inter-priority completion listener to requestcontrol.ResponseComplete.
+// bridges the inter-priority policy (GuaranteedMinimum) to the request control layer for VTC-style token accounting.
+type interPriorityCompletionAdapter struct {
+	listener interPriorityCompletionListener
+}
+
+func (a *interPriorityCompletionAdapter) TypedName() plugins.TypedName {
+	return plugins.TypedName{Type: "InterPriorityCompletionAdapter", Name: "GuaranteedMinimum"}
+}
+
+func (a *interPriorityCompletionAdapter) ResponseComplete(_ context.Context, _ *schedulingtypes.LLMRequest, response *requestcontrol.Response, _ *backend.Pod) {
+	if response == nil || response.Usage == nil {
+		return
+	}
+	totalTokens := uint64(response.Usage.PromptTokens + response.Usage.CompletionTokens)
+	a.listener.OnRequestComplete(response.Priority, totalTokens)
 }
