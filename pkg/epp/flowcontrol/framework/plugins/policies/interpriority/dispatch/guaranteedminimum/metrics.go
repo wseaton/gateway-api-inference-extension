@@ -20,18 +20,19 @@ import (
 	"strconv"
 
 	"github.com/prometheus/client_golang/prometheus"
+	compbasemetrics "k8s.io/component-base/metrics"
+
+	metricsutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/metrics"
 )
 
-const (
-	metricsSubsystem = "flow_control_inter_priority"
-)
+const metricsSubsystem = "inference_extension"
 
 var (
 	priorityBandTokensTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Subsystem: metricsSubsystem,
-			Name:      "tokens_total",
-			Help:      "Total tokens (input + output) processed per priority band.",
+			Name:      "inter_priority_tokens_total",
+			Help:      metricsutil.HelpMsgWithStability("Total tokens (input + output) processed per priority band.", compbasemetrics.ALPHA),
 		},
 		[]string{"priority"},
 	)
@@ -39,8 +40,8 @@ var (
 	priorityBandRequestsTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Subsystem: metricsSubsystem,
-			Name:      "requests_total",
-			Help:      "Total requests completed per priority band.",
+			Name:      "inter_priority_requests_total",
+			Help:      metricsutil.HelpMsgWithStability("Total requests completed per priority band.", compbasemetrics.ALPHA),
 		},
 		[]string{"priority"},
 	)
@@ -48,8 +49,8 @@ var (
 	starvationInterventionsTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Subsystem: metricsSubsystem,
-			Name:      "starvation_interventions_total",
-			Help:      "Total number of times a band was selected due to being below its minimum guarantee.",
+			Name:      "inter_priority_starvation_interventions_total",
+			Help:      metricsutil.HelpMsgWithStability("Total number of times a band was selected due to being below its minimum guarantee.", compbasemetrics.ALPHA),
 		},
 		[]string{"priority", "priority_name"},
 	)
@@ -58,8 +59,8 @@ var (
 	priorityBandCounter = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Subsystem: metricsSubsystem,
-			Name:      "counter",
-			Help:      "Current VTC counter value (cumulative tokens) per priority band.",
+			Name:      "inter_priority_counter",
+			Help:      metricsutil.HelpMsgWithStability("Current VTC counter value (cumulative tokens) per priority band.", compbasemetrics.ALPHA),
 		},
 		[]string{"priority"},
 	)
@@ -67,8 +68,8 @@ var (
 	priorityBandNormalizedCounter = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Subsystem: metricsSubsystem,
-			Name:      "normalized_counter",
-			Help:      "Current normalized VTC counter (counter/minRate) per priority band. Lower values indicate the band is behind.",
+			Name:      "inter_priority_normalized_counter",
+			Help:      metricsutil.HelpMsgWithStability("Current normalized VTC counter (counter/minRate) per priority band. Lower values indicate the band is behind.", compbasemetrics.ALPHA),
 		},
 		[]string{"priority"},
 	)
@@ -76,8 +77,8 @@ var (
 	priorityBandDeficit = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Subsystem: metricsSubsystem,
-			Name:      "deficit",
-			Help:      "Deficit of a guaranteed band relative to the highest priority band. Positive means behind, zero means caught up.",
+			Name:      "inter_priority_deficit",
+			Help:      metricsutil.HelpMsgWithStability("Deficit of a guaranteed band relative to the highest priority band. Positive means behind, zero means caught up.", compbasemetrics.ALPHA),
 		},
 		[]string{"priority"},
 	)
