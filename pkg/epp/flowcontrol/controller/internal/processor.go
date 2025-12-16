@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -31,6 +32,7 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/contracts"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/framework"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/types"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metrics"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
 )
 
@@ -322,6 +324,7 @@ func (sp *ShardProcessor) dispatchCycle(ctx context.Context) bool {
 	req := item.OriginalRequest()
 	candidatePods := req.CandidatePodsForScheduling()
 	if sp.saturationDetector.IsSaturated(ctx, candidatePods) {
+		metrics.RecordFlowControlSaturationBlock(strconv.Itoa(selectedBand.Priority()))
 		sp.logger.V(logutil.DEBUG).Info("Policy's chosen item is saturated; enforcing HoL blocking.",
 			"flowKey", req.FlowKey(), "reqID", req.ID(), "priorityName", selectedBand.PriorityName())
 		// Stop the dispatch cycle entirely to respect strict policy decision and prevent priority inversion where
@@ -339,7 +342,8 @@ func (sp *ShardProcessor) dispatchCycle(ctx context.Context) bool {
 		return false
 	}
 
-	// notify the policy of successful dispatch
+	// record metrics and notify the policy of successful dispatch
+	metrics.RecordFlowControlDispatch(strconv.Itoa(selectedBand.Priority()))
 	interPriorityPolicy.OnDispatchComplete(selectedBand.Priority(), req.ByteSize())
 	return true
 }

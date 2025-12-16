@@ -276,6 +276,24 @@ var (
 		[]string{"fairness_id", "priority"},
 	)
 
+	flowControlSaturationBlocks = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Subsystem: InferenceExtension,
+			Name:      "flow_control_saturation_blocks_total",
+			Help:      metricsutil.HelpMsgWithStability("Total number of times dispatch was blocked due to backend saturation (HoL blocking).", compbasemetrics.ALPHA),
+		},
+		[]string{"priority"},
+	)
+
+	flowControlDispatches = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Subsystem: InferenceExtension,
+			Name:      "flow_control_dispatches_total",
+			Help:      metricsutil.HelpMsgWithStability("Total number of requests dispatched by the flow control layer.", compbasemetrics.ALPHA),
+		},
+		[]string{"priority"},
+	)
+
 	// VTC (Virtual Token Counter) Policy Metrics
 	vtcVirtualCounter = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -340,6 +358,8 @@ func Register(customCollectors ...prometheus.Collector) {
 		metrics.Registry.MustRegister(PrefixCacheHitLength)
 		metrics.Registry.MustRegister(flowControlRequestQueueDuration)
 		metrics.Registry.MustRegister(flowControlQueueSize)
+		metrics.Registry.MustRegister(flowControlSaturationBlocks)
+		metrics.Registry.MustRegister(flowControlDispatches)
 		for _, collector := range customCollectors {
 			metrics.Registry.MustRegister(collector)
 		}
@@ -516,4 +536,14 @@ func IncFlowControlQueueSize(fairnessID, priority string) {
 // DecFlowControlQueueSize decrements the Flow Control queue size gauge.
 func DecFlowControlQueueSize(fairnessID, priority string) {
 	flowControlQueueSize.WithLabelValues(fairnessID, priority).Dec()
+}
+
+// RecordFlowControlSaturationBlock increments the counter when dispatch is blocked due to saturation.
+func RecordFlowControlSaturationBlock(priority string) {
+	flowControlSaturationBlocks.WithLabelValues(priority).Inc()
+}
+
+// RecordFlowControlDispatch increments the counter when a request is dispatched.
+func RecordFlowControlDispatch(priority string) {
+	flowControlDispatches.WithLabelValues(priority).Inc()
 }
