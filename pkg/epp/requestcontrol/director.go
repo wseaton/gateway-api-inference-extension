@@ -342,6 +342,7 @@ func (d *Director) runResponseStreamingPlugins(ctx context.Context, request *sch
 
 func (d *Director) runResponseCompletePlugins(ctx context.Context, request *schedulingtypes.LLMRequest, response *Response, targetPod *backend.Pod) {
 	loggerDebug := log.FromContext(ctx).V(logutil.DEBUG)
+	loggerDebug.Info("Running ResponseComplete plugins", "count", len(d.requestControlPlugins.responseCompletePlugins))
 	for _, plugin := range d.requestControlPlugins.responseCompletePlugins {
 		loggerDebug.Info("Running ResponseComplete plugin", "plugin", plugin.TypedName())
 		before := time.Now()

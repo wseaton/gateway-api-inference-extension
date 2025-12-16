@@ -663,14 +663,35 @@ type interPriorityCompletionAdapter struct {
 	listener interPriorityCompletionListener
 }
 
+// compile-time interface assertions
+var _ requestcontrol.ResponseComplete = (*interPriorityCompletionAdapter)(nil)
+var _ requestcontrol.ResponseComplete = (*vtcCompletionAdapter)(nil)
+
 func (a *interPriorityCompletionAdapter) TypedName() plugins.TypedName {
 	return plugins.TypedName{Type: "InterPriorityCompletionAdapter", Name: "GuaranteedMinimum"}
 }
 
-func (a *interPriorityCompletionAdapter) ResponseComplete(_ context.Context, _ *schedulingtypes.LLMRequest, response *requestcontrol.Response, _ *backend.Pod) {
-	if response == nil || response.Usage == nil {
+func (a *interPriorityCompletionAdapter) ResponseComplete(ctx context.Context, _ *schedulingtypes.LLMRequest, response *requestcontrol.Response, _ *backend.Pod) {
+	logger := log.FromContext(ctx)
+	// always log at TRACE level that we entered this callback
+	logger.V(logging.TRACE).Info("interPriorityCompletionAdapter: ResponseComplete called",
+		"hasResponse", response != nil)
+	if response == nil {
+		logger.V(logging.DEBUG).Info("interPriorityCompletionAdapter: response is nil, skipping")
 		return
 	}
-	totalTokens := uint64(response.Usage.PromptTokens + response.Usage.CompletionTokens)
+	// usage is never nil (it's &reqCtx.Usage), but check if tokens are zero
+	usage := response.Usage
+	if usage == nil {
+		logger.V(logging.DEBUG).Info("interPriorityCompletionAdapter: response.Usage is nil, skipping",
+			"priority", response.Priority)
+		return
+	}
+	totalTokens := uint64(usage.PromptTokens + usage.CompletionTokens)
+	logger.V(logging.DEBUG).Info("interPriorityCompletionAdapter: recording completion",
+		"priority", response.Priority,
+		"promptTokens", usage.PromptTokens,
+		"completionTokens", usage.CompletionTokens,
+		"totalTokens", totalTokens)
 	a.listener.OnRequestComplete(response.Priority, totalTokens)
 }

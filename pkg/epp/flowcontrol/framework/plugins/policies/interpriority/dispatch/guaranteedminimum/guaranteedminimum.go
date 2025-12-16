@@ -174,12 +174,11 @@ func (p *guaranteedMinimum) OnDispatchComplete(priority int, cost uint64) {
 	recordDispatch(priority, cost)
 	p.updateCounterMetricsLocked(priority)
 
-	if logger.V(logutil.TRACE).Enabled() {
-		logger.V(logutil.TRACE).Info("dispatch recorded",
-			"priority", priority,
-			"cost", cost,
-			"counter", p.counters[priority])
-	}
+	logger.V(logutil.DEBUG).Info("inter-priority dispatch recorded",
+		"priority", priority,
+		"cost", cost,
+		"increment", increment,
+		"counter", p.counters[priority])
 }
 
 // updateCounterMetricsLocked updates the gauge metrics for a priority band.
