@@ -337,14 +337,16 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 			} else {
 				logger.V(logutil.DEFAULT).Error(err, "Failed to process request")
 			}
-			resp, err := buildErrResponse(err)
-			if err != nil {
-				return err
+			resp, buildErr := buildErrResponse(err)
+			if buildErr != nil {
+				return buildErr
 			}
-			if err := srv.Send(resp); err != nil {
-				logger.V(logutil.DEFAULT).Error(err, "Send failed")
-				return status.Errorf(codes.Unknown, "failed to send response back to Envoy: %v", err)
+			logger.Info("Sending ImmediateResponse", "errorCode", errutil.CanonicalCode(err), "requestState", reqCtx.RequestState)
+			if sendErr := srv.Send(resp); sendErr != nil {
+				logger.V(logutil.DEFAULT).Error(sendErr, "Send failed for ImmediateResponse")
+				return status.Errorf(codes.Unknown, "failed to send response back to Envoy: %v", sendErr)
 			}
+			logger.Info("ImmediateResponse sent successfully", "errorCode", errutil.CanonicalCode(err))
 			return nil
 		}
 		loggerTrace.Info("checking", "request state", reqCtx.RequestState)
