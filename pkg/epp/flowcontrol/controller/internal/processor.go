@@ -243,7 +243,7 @@ func (sp *ShardProcessor) enqueue(item *FlowItem) {
 	// --- Capacity Check ---
 	// This check is safe because it is performed by the single-writer Run goroutine.
 	if !sp.hasCapacity(key.Priority, req.ByteSize()) {
-		sp.logger.Info("CAPACITY REJECTION: queue at capacity",
+		sp.logger.V(logutil.DEBUG).Info("CAPACITY REJECTION: queue at capacity",
 			"flowKey", key, "reqID", req.ID(), "priorityName", band.PriorityName(), "reqByteSize", req.ByteSize())
 		item.FinalizeWithOutcome(types.QueueOutcomeRejectedCapacity, fmt.Errorf("%w: %w",
 			types.ErrRejected, types.ErrQueueAtCapacity))
