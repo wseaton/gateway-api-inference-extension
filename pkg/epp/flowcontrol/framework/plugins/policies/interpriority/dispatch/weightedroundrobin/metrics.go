@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package creditbatchpriority
+package weightedroundrobin
 
 import (
 	"strconv"
@@ -25,9 +25,4 @@ import (
 // recordDispatch records tokens and request count for a priority band.
 func recordDispatch(priority int, tokens uint64) {
 	metrics.RecordInterPriorityDispatch(strconv.Itoa(priority), tokens)
-}
-
-// recordCounterState records the current VTC state for a priority band.
-func recordCounterState(priority int, counter float64, normalized float64, deficit float64) {
-	metrics.RecordInterPriorityCounterState(strconv.Itoa(priority), counter, normalized, deficit)
 }

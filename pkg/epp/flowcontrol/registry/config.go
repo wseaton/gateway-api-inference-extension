@@ -27,7 +27,7 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/framework/plugins/policies/interflow/dispatch/besthead"
 	_ "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/framework/plugins/policies/interflow/dispatch/vtc"
 	interpriority "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/framework/plugins/policies/interpriority/dispatch"
-	_ "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/framework/plugins/policies/interpriority/dispatch/creditbatchpriority"
+	_ "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/framework/plugins/policies/interpriority/dispatch/weightedroundrobin"
 	_ "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/framework/plugins/policies/interpriority/dispatch/strictpriority"
 	_ "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/framework/plugins/policies/interpriority/dispatch/weightedpriority"
 	intra "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/framework/plugins/policies/intraflow/dispatch"
@@ -49,7 +49,7 @@ const (
 	// defaultInterFlowDispatchPolicy is the default policy for selecting which flow's queue to service next.
 	defaultInterFlowDispatchPolicy string = besthead.BestHeadPolicyName
 	// defaultInterPriorityDispatchPolicy is the default policy for selecting which priority band to service next.
-	defaultInterPriorityDispatchPolicy interpriority.RegisteredPolicyName = "CreditBatchPriority"
+	defaultInterPriorityDispatchPolicy interpriority.RegisteredPolicyName = "WeightedRoundRobin"
 	// defaultQueue is the default queue implementation for flows.
 	defaultQueue queue.RegisteredQueueName = queue.ListQueueName
 	// defaultInitialShardCount is the default number of parallel shards to create when the registry is initialized.

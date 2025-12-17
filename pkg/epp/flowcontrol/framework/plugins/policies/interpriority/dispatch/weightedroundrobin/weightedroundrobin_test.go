@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package creditbatchpriority
+package weightedroundrobin
 
 import (
 	"sync"
@@ -71,7 +71,7 @@ func (m *mockPriorityBand) IterateQueues(callback func(queue framework.FlowQueue
 	}
 }
 
-func TestCreditBatchPriority_GrantsCreditsOnSelection(t *testing.T) {
+func TestWeightedRoundRobin_GrantsCreditsOnSelection(t *testing.T) {
 	config := Config{
 		Weights: map[int]float64{
 			100: 10.0,
@@ -79,7 +79,7 @@ func TestCreditBatchPriority_GrantsCreditsOnSelection(t *testing.T) {
 		},
 	}
 
-	policy := newCreditBatchPriority(config, "test")
+	policy := newWeightedRoundRobin(config, "test")
 
 	bands := []framework.PriorityBandAccessor{
 		&mockPriorityBand{
@@ -98,7 +98,7 @@ func TestCreditBatchPriority_GrantsCreditsOnSelection(t *testing.T) {
 		},
 	}
 
-	// first selection should pick high priority (both at 0, high comes first)
+	// first selection should pick first band with work (round-robin starts at index 0)
 	got, err := policy.SelectBand(bands)
 	if err != nil {
 		t.Fatalf("SelectBand returned error: %v", err)
@@ -117,7 +117,7 @@ func TestCreditBatchPriority_GrantsCreditsOnSelection(t *testing.T) {
 	}
 }
 
-func TestCreditBatchPriority_ConsecutiveDispatchesWhileCredits(t *testing.T) {
+func TestWeightedRoundRobin_ConsecutiveDispatchesWhileCredits(t *testing.T) {
 	config := Config{
 		Weights: map[int]float64{
 			100: 5.0,
@@ -125,7 +125,7 @@ func TestCreditBatchPriority_ConsecutiveDispatchesWhileCredits(t *testing.T) {
 		},
 	}
 
-	policy := newCreditBatchPriority(config, "test")
+	policy := newWeightedRoundRobin(config, "test")
 
 	bands := []framework.PriorityBandAccessor{
 		&mockPriorityBand{
@@ -154,23 +154,19 @@ func TestCreditBatchPriority_ConsecutiveDispatchesWhileCredits(t *testing.T) {
 			t.Errorf("iteration %d: expected priority 100 (still has credits), got %v", i, got)
 		}
 		policy.OnDispatch(100)
-		policy.OnDispatchComplete(100, 0)
 	}
 
-	// credits exhausted, next selection should trigger VTC re-evaluation
-	// low priority has counter=0, high has counter=5
-	// normalized: low=0/1=0, high=5/5=1
-	// low should win
+	// credits exhausted, next selection should rotate to low priority
 	got, err := policy.SelectBand(bands)
 	if err != nil {
 		t.Fatalf("SelectBand returned error: %v", err)
 	}
 	if got == nil || got.Priority() != 50 {
-		t.Errorf("expected priority 50 (lower normalized after credits exhausted), got %v", got)
+		t.Errorf("expected priority 50 (rotation after credits exhausted), got %v", got)
 	}
 }
 
-func TestCreditBatchPriority_ClearCreditsWhenBandHasNoWork(t *testing.T) {
+func TestWeightedRoundRobin_ClearCreditsWhenBandHasNoWork(t *testing.T) {
 	config := Config{
 		Weights: map[int]float64{
 			100: 10.0,
@@ -178,7 +174,7 @@ func TestCreditBatchPriority_ClearCreditsWhenBandHasNoWork(t *testing.T) {
 		},
 	}
 
-	policy := newCreditBatchPriority(config, "test")
+	policy := newWeightedRoundRobin(config, "test")
 
 	// high priority has work initially
 	highQueue := &mockFlowQueue{flowKey: types.FlowKey{ID: "flow1", Priority: 100}, length: 1}
@@ -203,7 +199,6 @@ func TestCreditBatchPriority_ClearCreditsWhenBandHasNoWork(t *testing.T) {
 		t.Fatalf("expected initial selection of priority 100")
 	}
 	policy.OnDispatch(100)
-	policy.OnDispatchComplete(100, 0)
 
 	// simulate high priority queue becoming empty
 	highQueue.length = 0
@@ -227,7 +222,7 @@ func TestCreditBatchPriority_ClearCreditsWhenBandHasNoWork(t *testing.T) {
 	}
 }
 
-func TestCreditBatchPriority_VTCSelectionAfterCreditsExhausted(t *testing.T) {
+func TestWeightedRoundRobin_RoundRobinPattern(t *testing.T) {
 	config := Config{
 		Weights: map[int]float64{
 			100: 2.0,
@@ -235,7 +230,7 @@ func TestCreditBatchPriority_VTCSelectionAfterCreditsExhausted(t *testing.T) {
 		},
 	}
 
-	policy := newCreditBatchPriority(config, "test")
+	policy := newWeightedRoundRobin(config, "test")
 
 	bands := []framework.PriorityBandAccessor{
 		&mockPriorityBand{
@@ -265,11 +260,10 @@ func TestCreditBatchPriority_VTCSelectionAfterCreditsExhausted(t *testing.T) {
 		if got != nil {
 			selections[got.Priority()]++
 			policy.OnDispatch(got.Priority())
-			policy.OnDispatchComplete(got.Priority(), 0)
 		}
 	}
 
-	// with 2:1 weights, expect ~6 high and ~3 low
+	// with 2:1 weights, expect 6 high and 3 low
 	if selections[100] != 6 {
 		t.Errorf("expected 6 high priority selections, got %d", selections[100])
 	}
@@ -278,14 +272,14 @@ func TestCreditBatchPriority_VTCSelectionAfterCreditsExhausted(t *testing.T) {
 	}
 }
 
-func TestCreditBatchPriority_ConcurrentAccess(t *testing.T) {
+func TestWeightedRoundRobin_ConcurrentAccess(t *testing.T) {
 	config := Config{
 		Weights: map[int]float64{
 			100: 10.0,
 		},
 	}
 
-	policy := newCreditBatchPriority(config, "test")
+	policy := newWeightedRoundRobin(config, "test")
 
 	bands := []framework.PriorityBandAccessor{
 		&mockPriorityBand{
@@ -331,17 +325,17 @@ func TestCreditBatchPriority_ConcurrentAccess(t *testing.T) {
 	wg.Wait()
 
 	// verify no data races occurred (test would fail with -race if there were)
-	counters, total, _, _ := policy.GetStats()
-	if total != float64(iterations) {
-		t.Errorf("expected %d total dispatches, got %f", iterations, total)
+	dispatchCounts, total, _, _ := policy.GetStats()
+	if total != uint64(iterations) {
+		t.Errorf("expected %d total dispatches, got %d", iterations, total)
 	}
-	if counters[100] != float64(iterations) {
-		t.Errorf("expected counter[100]=%d, got %f", iterations, counters[100])
+	if dispatchCounts[100] != uint64(iterations) {
+		t.Errorf("expected dispatchCounts[100]=%d, got %d", iterations, dispatchCounts[100])
 	}
 }
 
-func TestCreditBatchPriority_TypedName(t *testing.T) {
-	policy := newCreditBatchPriority(DefaultConfig(), "test-policy")
+func TestWeightedRoundRobin_TypedName(t *testing.T) {
+	policy := newWeightedRoundRobin(DefaultConfig(), "test-policy")
 
 	typedName := policy.TypedName()
 	if typedName.Type != framework.InterPriorityDispatchPolicyType {
@@ -352,8 +346,8 @@ func TestCreditBatchPriority_TypedName(t *testing.T) {
 	}
 }
 
-func TestCreditBatchPriority_EmptyBands(t *testing.T) {
-	policy := newCreditBatchPriority(DefaultConfig(), "test")
+func TestWeightedRoundRobin_EmptyBands(t *testing.T) {
+	policy := newWeightedRoundRobin(DefaultConfig(), "test")
 
 	got, err := policy.SelectBand(nil)
 	if err != nil {
@@ -372,7 +366,7 @@ func TestCreditBatchPriority_EmptyBands(t *testing.T) {
 	}
 }
 
-func TestCreditBatchPriority_AllBandsEmpty(t *testing.T) {
+func TestWeightedRoundRobin_AllBandsEmpty(t *testing.T) {
 	config := Config{
 		Weights: map[int]float64{
 			100: 10.0,
@@ -380,7 +374,7 @@ func TestCreditBatchPriority_AllBandsEmpty(t *testing.T) {
 		},
 	}
 
-	policy := newCreditBatchPriority(config, "test")
+	policy := newWeightedRoundRobin(config, "test")
 
 	bands := []framework.PriorityBandAccessor{
 		&mockPriorityBand{
@@ -404,7 +398,7 @@ func TestCreditBatchPriority_AllBandsEmpty(t *testing.T) {
 	}
 }
 
-func TestCreditBatchPriority_ColdStart(t *testing.T) {
+func TestWeightedRoundRobin_ColdStart(t *testing.T) {
 	config := Config{
 		Weights: map[int]float64{
 			10: 10.0,
@@ -412,7 +406,7 @@ func TestCreditBatchPriority_ColdStart(t *testing.T) {
 		},
 	}
 
-	policy := newCreditBatchPriority(config, "test")
+	policy := newWeightedRoundRobin(config, "test")
 
 	bands := []framework.PriorityBandAccessor{
 		&mockPriorityBand{
@@ -431,7 +425,7 @@ func TestCreditBatchPriority_ColdStart(t *testing.T) {
 		},
 	}
 
-	// on cold start, all counters are 0, first band with work wins
+	// on cold start, first band with work wins (round-robin starts at 0)
 	got, err := policy.SelectBand(bands)
 	if err != nil {
 		t.Fatalf("SelectBand returned error: %v", err)
@@ -441,41 +435,14 @@ func TestCreditBatchPriority_ColdStart(t *testing.T) {
 	}
 }
 
-func TestCreditBatchPriority_CostBasedAccounting(t *testing.T) {
-	config := Config{
-		Weights: map[int]float64{
-			100: 10.0,
-			50:  1.0,
-		},
-	}
-
-	policy := newCreditBatchPriority(config, "test")
-
-	// dispatch with explicit costs
-	policy.OnDispatchComplete(100, 500)
-	policy.OnDispatchComplete(100, 300)
-	policy.OnDispatchComplete(50, 100)
-
-	counters, total, _, _ := policy.GetStats()
-	if total != 900 {
-		t.Errorf("expected total 900, got %f", total)
-	}
-	if counters[100] != 800 {
-		t.Errorf("expected counter[100]=800, got %f", counters[100])
-	}
-	if counters[50] != 100 {
-		t.Errorf("expected counter[50]=100, got %f", counters[50])
-	}
-}
-
-func TestCreditBatchPriority_DefaultWeight(t *testing.T) {
+func TestWeightedRoundRobin_DefaultWeight(t *testing.T) {
 	// bands not in config should default to weight 1.0
 	config := Config{
 		Weights: map[int]float64{
 			100: 5.0, // only configure priority 100
 		},
 	}
-	policy := newCreditBatchPriority(config, "test")
+	policy := newWeightedRoundRobin(config, "test")
 
 	bands := []framework.PriorityBandAccessor{
 		&mockPriorityBand{
@@ -502,7 +469,7 @@ func TestCreditBatchPriority_DefaultWeight(t *testing.T) {
 	}
 }
 
-func TestCreditBatchPriority_BatchingPattern(t *testing.T) {
+func TestWeightedRoundRobin_BatchingPattern(t *testing.T) {
 	// verify the exact batching pattern with 3:1 weights
 	config := Config{
 		Weights: map[int]float64{
@@ -511,7 +478,7 @@ func TestCreditBatchPriority_BatchingPattern(t *testing.T) {
 		},
 	}
 
-	policy := newCreditBatchPriority(config, "test")
+	policy := newWeightedRoundRobin(config, "test")
 
 	bands := []framework.PriorityBandAccessor{
 		&mockPriorityBand{
@@ -542,11 +509,10 @@ func TestCreditBatchPriority_BatchingPattern(t *testing.T) {
 			t.Errorf("iteration %d: expected priority %d, got %v", i, expected, got)
 		}
 		policy.OnDispatch(got.Priority())
-		policy.OnDispatchComplete(got.Priority(), 0)
 	}
 }
 
-func TestCreditBatchPriority_SkipsEmptyBands(t *testing.T) {
+func TestWeightedRoundRobin_SkipsEmptyBands(t *testing.T) {
 	config := Config{
 		Weights: map[int]float64{
 			100: 10.0,
@@ -554,7 +520,7 @@ func TestCreditBatchPriority_SkipsEmptyBands(t *testing.T) {
 		},
 	}
 
-	policy := newCreditBatchPriority(config, "test")
+	policy := newWeightedRoundRobin(config, "test")
 
 	bands := []framework.PriorityBandAccessor{
 		&mockPriorityBand{

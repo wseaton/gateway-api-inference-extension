@@ -14,15 +14,15 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package creditbatchpriority
+package weightedroundrobin
 
-// Config holds the configuration for the CreditBatchPriority policy.
+// Config holds the configuration for the WeightedRoundRobin policy.
 type Config struct {
 	// Weights maps priority level to its dispatch weight.
-	// Higher weights receive proportionally more throughput AND more consecutive dispatches.
+	// Higher weights receive proportionally more throughput via more consecutive dispatches.
 	// When a band is selected, it receives weight credits (consecutive dispatch opportunities).
 	// Bands not in this map get a default weight of 1.0.
-	// Example: {10: 10.0, 0: 1.0} means priority 10 gets ~10x throughput and 10 consecutive dispatches.
+	// Example: {10: 10.0, 0: 1.0} means priority 10 gets 10 consecutive dispatches per round.
 	Weights map[int]float64 `json:"weights,omitempty"`
 }
 
