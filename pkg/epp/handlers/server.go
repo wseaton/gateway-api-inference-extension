@@ -221,19 +221,20 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 				// Body stream complete. Allocate empty slice for response to use.
 				body = []byte{}
 
-				reqCtx, err = s.director.HandleRequest(ctx, reqCtx)
-				if err != nil {
-					logger.V(logutil.DEFAULT).Error(err, "Error handling request")
-					break
-				}
-
 				// Populate the ExtProc protocol responses for the request body.
+				// Must happen before HandleRequest so flow control has the correct byte size.
 				requestBodyBytes, err := json.Marshal(reqCtx.Request.Body)
 				if err != nil {
 					logger.V(logutil.DEFAULT).Error(err, "Error marshalling request body")
 					break
 				}
 				reqCtx.RequestSize = len(requestBodyBytes)
+
+				reqCtx, err = s.director.HandleRequest(ctx, reqCtx)
+				if err != nil {
+					logger.V(logutil.DEFAULT).Error(err, "Error handling request")
+					break
+				}
 				reqCtx.reqHeaderResp = s.generateRequestHeaderResponse(reqCtx)
 				reqCtx.reqBodyResp = s.generateRequestBodyResponses(requestBodyBytes)
 
