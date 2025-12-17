@@ -622,8 +622,9 @@ func (fr *FlowRegistry) createInterPriorityPolicy(cfg *Config) (framework.InterP
 	policyName := string(cfg.InterPriorityDispatchPolicy)
 	policyParams := cfg.InterPriorityDispatchPolicyParams
 
-	// auto-generate default config for WeightedPriority if none provided
-	if policyName == "WeightedPriority" && len(policyParams) == 0 {
+	// auto-generate default config for weight-based policies if none provided
+	needsAutoConfig := (policyName == "WeightedPriority" || policyName == "CreditBatchPriority") && len(policyParams) == 0
+	if needsAutoConfig {
 		weights := make(map[string]float64)
 		for _, band := range cfg.PriorityBands {
 			weight := float64(band.Priority)
@@ -638,10 +639,10 @@ func (fr *FlowRegistry) createInterPriorityPolicy(cfg *Config) (framework.InterP
 		var err error
 		policyParams, err = json.Marshal(defaultConfig)
 		if err != nil {
-			return nil, fmt.Errorf("failed to marshal default WeightedPriority config: %w", err)
+			return nil, fmt.Errorf("failed to marshal default %s config: %w", policyName, err)
 		}
-		fr.logger.Info("Auto-configured WeightedPriority with priority-based weights",
-			"weights", weights)
+		fr.logger.Info("Auto-configured inter-priority policy with priority-based weights",
+			"policy", policyName, "weights", weights)
 	}
 
 	fr.logger.Info("Instantiating shared InterPriorityDispatchPolicy",
