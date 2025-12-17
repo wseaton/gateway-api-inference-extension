@@ -171,7 +171,11 @@ func (fcac *FlowControlAdmissionController) Admit(
 	outcome, err := fcac.flowController.EnqueueAndWait(ctx, fcReq)
 	logger.V(logutil.DEBUG).Info("Flow control outcome",
 		"requestID", reqCtx.SchedulingRequest.RequestId, "outcome", outcome, "error", err)
-	return translateFlowControlOutcome(outcome, err)
+	translatedErr := translateFlowControlOutcome(outcome, err)
+	if translatedErr != nil {
+		logger.Info("Flow control rejection", "outcome", outcome, "translatedErr", translatedErr)
+	}
+	return translatedErr
 }
 
 // flowControlRequest is an adapter that implements the types.FlowControlRequest interface.
