@@ -251,6 +251,9 @@ func (fc *FlowController) EnqueueAndWait(
 		}
 
 		// The outcome is terminal (Dispatched, Evicted, or a non-retriable rejection).
+		if outcome != types.QueueOutcomeDispatched {
+			fc.logger.Info("EnqueueAndWait returning non-dispatch outcome", "outcome", outcome, "error", err)
+		}
 		return outcome, err
 	}
 }
