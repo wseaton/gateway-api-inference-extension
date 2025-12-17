@@ -93,6 +93,8 @@ var flowControlConfig = flowcontrol.Config{
 			{Priority: 10, PriorityName: "High", InterFlowDispatchPolicy: "VTC"},
 			{Priority: 0, PriorityName: "Default", InterFlowDispatchPolicy: "VTC"},
 		},
+		// Configure inter-priority weights: High gets 10x the dispatch opportunities of Default
+		InterPriorityDispatchPolicyParams: []byte(`{"weights": {"10": 10.0, "0": 1.0}}`),
 	},
 }
 
