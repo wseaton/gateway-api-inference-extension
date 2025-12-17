@@ -153,6 +153,7 @@ func TestCreditBatchPriority_ConsecutiveDispatchesWhileCredits(t *testing.T) {
 		if got == nil || got.Priority() != 100 {
 			t.Errorf("iteration %d: expected priority 100 (still has credits), got %v", i, got)
 		}
+		policy.OnDispatch(100)
 		policy.OnDispatchComplete(100, 0)
 	}
 
@@ -201,6 +202,7 @@ func TestCreditBatchPriority_ClearCreditsWhenBandHasNoWork(t *testing.T) {
 	if got.Priority() != 100 {
 		t.Fatalf("expected initial selection of priority 100")
 	}
+	policy.OnDispatch(100)
 	policy.OnDispatchComplete(100, 0)
 
 	// simulate high priority queue becoming empty
@@ -262,6 +264,7 @@ func TestCreditBatchPriority_VTCSelectionAfterCreditsExhausted(t *testing.T) {
 		}
 		if got != nil {
 			selections[got.Priority()]++
+			policy.OnDispatch(got.Priority())
 			policy.OnDispatchComplete(got.Priority(), 0)
 		}
 	}
@@ -302,6 +305,7 @@ func TestCreditBatchPriority_ConcurrentAccess(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := 0; i < iterations; i++ {
+			policy.OnDispatch(100)
 			policy.OnDispatchComplete(100, 0)
 		}
 	}()
@@ -537,6 +541,7 @@ func TestCreditBatchPriority_BatchingPattern(t *testing.T) {
 		if got == nil || got.Priority() != expected {
 			t.Errorf("iteration %d: expected priority %d, got %v", i, expected, got)
 		}
+		policy.OnDispatch(got.Priority())
 		policy.OnDispatchComplete(got.Priority(), 0)
 	}
 }

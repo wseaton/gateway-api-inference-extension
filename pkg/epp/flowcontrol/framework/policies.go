@@ -165,10 +165,18 @@ type InterPriorityDispatchPolicy interface {
 	// Conformance: Implementations MUST be goroutine-safe if they maintain internal state.
 	SelectBand(bands []PriorityBandAccessor) (PriorityBandAccessor, error)
 
-	// OnDispatchComplete is called after a successful dispatch from a band.
-	// Allows policies to update internal state (e.g., counters, deficit trackers).
+	// OnDispatch is called immediately after a request is dispatched from a band.
+	// This allows policies to update dispatch-time state (e.g., credit counters for batching).
+	// Called synchronously in the dispatch path before the request is sent to the backend.
+	// The priority identifies which band was serviced.
+	//
+	// Conformance: Implementations MUST be goroutine-safe if they maintain internal state.
+	OnDispatch(priority int)
+
+	// OnDispatchComplete is called after a request completes (response received).
+	// Allows policies to update internal state with actual resource consumption.
 	// The priority identifies which band was serviced, and cost represents the
-	// dispatched item's resource consumption (typically byte size).
+	// actual token consumption (input + output tokens).
 	OnDispatchComplete(priority int, cost uint64)
 }
 

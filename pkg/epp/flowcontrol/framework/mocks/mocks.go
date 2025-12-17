@@ -213,6 +213,7 @@ var _ framework.InterFlowDispatchPolicy = &MockInterFlowDispatchPolicy{}
 type MockInterPriorityDispatchPolicy struct {
 	NameV                  string
 	SelectBandFunc         func(bands []framework.PriorityBandAccessor) (framework.PriorityBandAccessor, error)
+	OnDispatchFunc         func(priority int)
 	OnDispatchCompleteFunc func(priority int, cost uint64)
 }
 
@@ -239,6 +240,12 @@ func (m *MockInterPriorityDispatchPolicy) SelectBand(bands []framework.PriorityB
 		}
 	}
 	return nil, nil
+}
+
+func (m *MockInterPriorityDispatchPolicy) OnDispatch(priority int) {
+	if m.OnDispatchFunc != nil {
+		m.OnDispatchFunc(priority)
+	}
 }
 
 func (m *MockInterPriorityDispatchPolicy) OnDispatchComplete(priority int, cost uint64) {

@@ -133,18 +133,28 @@ func (p *creditBatchPriority) SelectBand(bands []framework.PriorityBandAccessor)
 	return selectedBand, nil
 }
 
-// OnDispatchComplete is called after a successful dispatch from a band.
-// It decrements the credit counter and updates the VTC cumulative counter.
-func (p *creditBatchPriority) OnDispatchComplete(priority int, cost uint64) {
+// OnDispatch is called immediately after a request is dispatched from a band.
+// It decrements the credit counter for batching behavior.
+func (p *creditBatchPriority) OnDispatch(priority int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	// decrement credits if this is the active band
 	if p.hasActive && p.currentBand == priority && p.credits > 0 {
 		p.credits--
+		logger.V(logutil.TRACE).Info("credit consumed on dispatch",
+			"priority", priority,
+			"remainingCredits", p.credits)
 	}
+}
 
-	// update VTC counter
+// OnDispatchComplete is called after a request completes (response received).
+// It updates the VTC cumulative counter with actual token cost.
+func (p *creditBatchPriority) OnDispatchComplete(priority int, cost uint64) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	// update VTC counter with actual cost
 	increment := float64(cost)
 	if cost == 0 {
 		increment = 1
@@ -155,10 +165,9 @@ func (p *creditBatchPriority) OnDispatchComplete(priority int, cost uint64) {
 	recordDispatch(priority, cost)
 	p.updateCounterMetricsLocked(priority)
 
-	logger.V(logutil.TRACE).Info("dispatch complete",
+	logger.V(logutil.TRACE).Info("request complete",
 		"priority", priority,
 		"cost", cost,
-		"remainingCredits", p.credits,
 		"counter", p.counters[priority])
 }
 

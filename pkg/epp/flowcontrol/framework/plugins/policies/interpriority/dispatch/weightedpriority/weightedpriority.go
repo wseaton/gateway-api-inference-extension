@@ -120,6 +120,11 @@ func (p *weightedPriority) SelectBand(bands []framework.PriorityBandAccessor) (f
 	return selectedBand, nil
 }
 
+// OnDispatch is a no-op for weighted priority since it doesn't use credit batching.
+func (p *weightedPriority) OnDispatch(_ int) {
+	// no-op for weighted priority
+}
+
 // OnDispatchComplete records a dispatch by incrementing the cumulative counter.
 func (p *weightedPriority) OnDispatchComplete(priority int, cost uint64) {
 	p.mu.Lock()

@@ -69,6 +69,11 @@ func (p *strictPriority) SelectBand(bands []framework.PriorityBandAccessor) (fra
 	return nil, nil
 }
 
+// OnDispatch is a no-op for strict priority since no state tracking is needed.
+func (p *strictPriority) OnDispatch(_ int) {
+	// no-op for strict priority
+}
+
 // OnDispatchComplete is a no-op for strict priority since no state tracking is needed.
 func (p *strictPriority) OnDispatchComplete(_ int, _ uint64) {
 	// no-op for strict priority

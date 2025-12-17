@@ -124,6 +124,8 @@ func (p *defaultInterPriorityPolicy) SelectBand(bands []framework.PriorityBandAc
 	return nil, nil
 }
 
+func (p *defaultInterPriorityPolicy) OnDispatch(_ int) {}
+
 func (p *defaultInterPriorityPolicy) OnDispatchComplete(_ int, _ uint64) {}
 
 func (m *MockRegistryShard) PriorityBandAccessor(priority int) (framework.PriorityBandAccessor, error) {

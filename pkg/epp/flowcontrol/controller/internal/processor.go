@@ -342,6 +342,9 @@ func (sp *ShardProcessor) dispatchCycle(ctx context.Context) bool {
 		return false
 	}
 
+	// notify the inter-priority policy immediately (for credit-based batching)
+	interPriorityPolicy.OnDispatch(selectedBand.Priority())
+
 	// record metrics (token cost is recorded at response completion via OnRequestComplete)
 	metrics.RecordFlowControlDispatch(strconv.Itoa(selectedBand.Priority()))
 	return true
