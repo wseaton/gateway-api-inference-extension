@@ -90,8 +90,8 @@ var flowControlConfig = flowcontrol.Config{
 		// Define domain of accepted priority levels as this field is required. Use defaults for all optional fields.
 		// TODO: this should not be hardcoded.
 		PriorityBands: []fcregistry.PriorityBandConfig{
-			{Priority: 10, PriorityName: "High", InterFlowDispatchPolicy: "VTC", MaxBytes: 100_000_000}, // 100MB
-			{Priority: 0, PriorityName: "Default", InterFlowDispatchPolicy: "VTC", MaxBytes: 10_000_000}, // 10MB
+			{Priority: 10, PriorityName: "High", InterFlowDispatchPolicy: "VTC", MaxBytes: 50_000},  // 50KB (~125 reqs @ 400B)
+			{Priority: 0, PriorityName: "Default", InterFlowDispatchPolicy: "VTC", MaxBytes: 10_000}, // 10KB (~25 reqs @ 400B)
 		},
 		// Configure inter-priority weights: High gets 10x the dispatch opportunities of Default
 		InterPriorityDispatchPolicyParams: []byte(`{"weights": {"10": 10.0, "0": 1.0}}`),
