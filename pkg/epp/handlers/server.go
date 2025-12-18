@@ -223,8 +223,8 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 
 				// Populate the ExtProc protocol responses for the request body.
 				// Must happen before HandleRequest so flow control has the correct byte size.
-				var requestBodyBytes []byte
-				requestBodyBytes, err = json.Marshal(reqCtx.Request.Body)
+				
+				requestBodyBytes, err := json.Marshal(reqCtx.Request.Body)
 				if err != nil {
 					logger.V(logutil.DEFAULT).Error(err, "Error marshalling request body")
 					break
