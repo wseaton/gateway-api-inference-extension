@@ -223,7 +223,8 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 
 				// Populate the ExtProc protocol responses for the request body.
 				// Must happen before HandleRequest so flow control has the correct byte size.
-				requestBodyBytes, err := json.Marshal(reqCtx.Request.Body)
+				var requestBodyBytes []byte
+				requestBodyBytes, err = json.Marshal(reqCtx.Request.Body)
 				if err != nil {
 					logger.V(logutil.DEFAULT).Error(err, "Error marshalling request body")
 					break
@@ -332,6 +333,7 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 
 		// Handle the err and fire an immediate response.
 		if err != nil {
+			errorCode := errutil.CanonicalCode(err)
 			if logger.V(logutil.DEBUG).Enabled() {
 				logger.V(logutil.DEBUG).Error(err, "Failed to process request", "request", req)
 			} else {
@@ -339,14 +341,17 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 			}
 			resp, buildErr := buildErrResponse(err)
 			if buildErr != nil {
+				metrics.RecordImmediateResponse(errorCode, "build_error")
 				return buildErr
 			}
-			logger.Info("Sending ImmediateResponse", "errorCode", errutil.CanonicalCode(err), "requestState", reqCtx.RequestState)
+			logger.Info("Sending ImmediateResponse", "errorCode", errorCode, "requestState", reqCtx.RequestState)
 			if sendErr := srv.Send(resp); sendErr != nil {
+				metrics.RecordImmediateResponse(errorCode, "send_error")
 				logger.V(logutil.DEFAULT).Error(sendErr, "Send failed for ImmediateResponse")
 				return status.Errorf(codes.Unknown, "failed to send response back to Envoy: %v", sendErr)
 			}
-			logger.Info("ImmediateResponse sent successfully", "errorCode", errutil.CanonicalCode(err))
+			metrics.RecordImmediateResponse(errorCode, "sent")
+			logger.Info("ImmediateResponse sent successfully", "errorCode", errorCode)
 			return nil
 		}
 		loggerTrace.Info("checking", "request state", reqCtx.RequestState)

@@ -63,6 +63,15 @@ var (
 		[]string{"model_name", "target_model_name", "error_code"},
 	)
 
+	immediateResponseCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Subsystem: InferenceObjectiveComponent,
+			Name:      "immediate_response_total",
+			Help:      metricsutil.HelpMsgWithStability("Counter of ImmediateResponse messages sent by ext-proc, broken out by error code and outcome.", compbasemetrics.ALPHA),
+		},
+		[]string{"error_code", "outcome"},
+	)
+
 	requestLatencies = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Subsystem: InferenceObjectiveComponent,
@@ -394,6 +403,7 @@ func Register(customCollectors ...prometheus.Collector) {
 	registerMetrics.Do(func() {
 		metrics.Registry.MustRegister(requestCounter)
 		metrics.Registry.MustRegister(requestErrCounter)
+		metrics.Registry.MustRegister(immediateResponseCounter)
 		metrics.Registry.MustRegister(requestLatencies)
 		metrics.Registry.MustRegister(requestSizes)
 		metrics.Registry.MustRegister(responseSizes)
@@ -463,6 +473,12 @@ func RecordRequestErrCounter(modelName, targetModelName string, code string) {
 	if code != "" {
 		requestErrCounter.WithLabelValues(modelName, targetModelName, code).Inc()
 	}
+}
+
+// RecordImmediateResponse records an ImmediateResponse being sent.
+// outcome should be "sent", "build_error", or "send_error".
+func RecordImmediateResponse(errorCode, outcome string) {
+	immediateResponseCounter.WithLabelValues(errorCode, outcome).Inc()
 }
 
 // RecordRequestSizes records the request sizes.
