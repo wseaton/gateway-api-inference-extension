@@ -56,13 +56,16 @@ func newWeightedPriorityFactory(name string, rawConfig json.RawMessage, _ plugin
 }
 
 // weightedPriority implements `framework.InterPriorityDispatchPolicy` using weighted fair queuing.
-// Bands receive throughput proportional to their configured weight using VTC-style counters.
+// Bands receive throughput proportional to their configured weight using in-flight request tracking.
+// The policy selects the band with the lowest in-flight load (inFlight / weight), ensuring that
+// higher-weighted priorities can have proportionally more concurrent requests.
 type weightedPriority struct {
 	typedName plugins.TypedName
 	config    Config
 
 	mu       sync.Mutex
-	counters map[int]float64 // cumulative tokens per priority
+	counters map[int]float64 // cumulative tokens per priority (for metrics/long-term accounting)
+	inFlight map[int]int64   // current in-flight request count per priority
 }
 
 func newWeightedPriority(config Config, name string) *weightedPriority {
@@ -72,6 +75,7 @@ func newWeightedPriority(config Config, name string) *weightedPriority {
 		typedName: plugins.TypedName{Type: framework.InterPriorityDispatchPolicyType, Name: name},
 		config:    config,
 		counters:  make(map[int]float64),
+		inFlight:  make(map[int]int64),
 	}
 }
 
@@ -81,9 +85,10 @@ func (p *weightedPriority) TypedName() plugins.TypedName {
 }
 
 // SelectBand chooses which priority band should get the next dispatch slot.
-// It uses weighted fair queuing: the band with the lowest normalized counter
-// (cumulative_tokens / weight) is selected. This ensures bands receive throughput
-// proportional to their configured weights.
+// It uses in-flight aware weighted fair queuing: the band with the lowest in-flight load
+// (inFlight / weight) is selected. This ensures bands receive concurrent request capacity
+// proportional to their configured weights, providing effective traffic shaping even when
+// requests have long durations.
 func (p *weightedPriority) SelectBand(bands []framework.PriorityBandAccessor) (framework.PriorityBandAccessor, error) {
 	if len(bands) == 0 {
 		return nil, nil
@@ -93,7 +98,7 @@ func (p *weightedPriority) SelectBand(bands []framework.PriorityBandAccessor) (f
 	defer p.mu.Unlock()
 
 	var selectedBand framework.PriorityBandAccessor
-	lowestNormalized := math.MaxFloat64
+	lowestLoad := math.MaxFloat64
 
 	for _, band := range bands {
 		if !bandHasWork(band) {
@@ -102,10 +107,11 @@ func (p *weightedPriority) SelectBand(bands []framework.PriorityBandAccessor) (f
 
 		pri := band.Priority()
 		weight := p.config.getWeight(pri)
-		normalized := p.counters[pri] / weight
+		// use in-flight count for immediate backpressure-aware selection
+		inFlightLoad := float64(p.inFlight[pri]) / weight
 
-		if normalized < lowestNormalized {
-			lowestNormalized = normalized
+		if inFlightLoad < lowestLoad {
+			lowestLoad = inFlightLoad
 			selectedBand = band
 		}
 	}
@@ -114,23 +120,41 @@ func (p *weightedPriority) SelectBand(bands []framework.PriorityBandAccessor) (f
 		logger.V(logutil.TRACE).Info("selecting band via weighted priority",
 			"priority", selectedBand.Priority(),
 			"priorityName", selectedBand.PriorityName(),
-			"normalized", lowestNormalized)
+			"inFlightLoad", lowestLoad,
+			"inFlight", p.inFlight[selectedBand.Priority()])
 	}
 
 	return selectedBand, nil
 }
 
-// OnDispatch is a no-op for weighted priority since it doesn't use credit batching.
-func (p *weightedPriority) OnDispatch(_ int) {
-	// no-op for weighted priority
+// OnDispatch increments the in-flight counter for the dispatched priority band.
+// This is called immediately when a request is dispatched, before it reaches the backend.
+func (p *weightedPriority) OnDispatch(priority int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.inFlight[priority]++
+
+	logger.V(logutil.TRACE).Info("in-flight incremented on dispatch",
+		"priority", priority,
+		"inFlight", p.inFlight[priority])
 }
 
-// OnDispatchComplete records a dispatch by incrementing the cumulative counter.
+// OnDispatchComplete decrements the in-flight counter and records cumulative token usage.
+// This is called after a request completes (response received).
 func (p *weightedPriority) OnDispatchComplete(priority int, cost uint64) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	// use cost if provided, otherwise count as 1
+	// decrement in-flight counter
+	p.inFlight[priority]--
+	if p.inFlight[priority] < 0 {
+		// shouldn't happen, but guard against underflow
+		logger.V(logutil.DEFAULT).Info("WARNING: in-flight counter went negative, resetting to 0",
+			"priority", priority)
+		p.inFlight[priority] = 0
+	}
+
+	// update cumulative counter for long-term accounting/metrics
 	increment := float64(cost)
 	if cost == 0 {
 		increment = 1
@@ -141,11 +165,11 @@ func (p *weightedPriority) OnDispatchComplete(priority int, cost uint64) {
 	recordDispatch(priority, cost)
 	p.updateCounterMetricsLocked(priority)
 
-	logger.V(logutil.DEBUG).Info("inter-priority dispatch recorded",
+	logger.V(logutil.DEBUG).Info("request complete, in-flight decremented",
 		"priority", priority,
 		"cost", cost,
-		"increment", increment,
-		"counter", p.counters[priority])
+		"inFlight", p.inFlight[priority],
+		"cumulativeCounter", p.counters[priority])
 }
 
 // updateCounterMetricsLocked updates the gauge metrics for a priority band.
@@ -185,6 +209,18 @@ func (p *weightedPriority) GetStats() (counters map[int]float64, total float64) 
 		total += count
 	}
 	return counters, total
+}
+
+// GetInFlightStats returns current in-flight request counts per priority.
+func (p *weightedPriority) GetInFlightStats() map[int]int64 {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	inFlight := make(map[int]int64, len(p.inFlight))
+	for pri, count := range p.inFlight {
+		inFlight[pri] = count
+	}
+	return inFlight
 }
 
 // bandHasWork returns true if the band has at least one queue with items.

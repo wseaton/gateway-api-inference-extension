@@ -623,7 +623,7 @@ func (fr *FlowRegistry) createInterPriorityPolicy(cfg *Config) (framework.InterP
 	policyParams := cfg.InterPriorityDispatchPolicyParams
 
 	// auto-generate default config for weight-based policies if none provided
-	needsAutoConfig := (policyName == "WeightedPriority" || policyName == "WeightedRoundRobin") && len(policyParams) == 0
+	needsAutoConfig := policyName == "WeightedPriority" && len(policyParams) == 0
 	if needsAutoConfig {
 		weights := make(map[string]float64)
 		for _, band := range cfg.PriorityBands {
