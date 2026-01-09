@@ -81,21 +81,50 @@ const (
 	// enableExperimentalFlowControlLayer defines the environment variable used as a feature flag for the pluggable flow
 	// control layer.
 	enableExperimentalFlowControlLayer = "ENABLE_EXPERIMENTAL_FLOW_CONTROL_LAYER"
+
+	// flow control priority band configuration env vars
+	fcHighPriorityMaxBytes    = "FC_HIGH_PRIORITY_MAX_BYTES"    // max queue bytes for high priority band (0 = 1GB default)
+	fcDefaultPriorityMaxBytes = "FC_DEFAULT_PRIORITY_MAX_BYTES" // max queue bytes for default priority band (0 = 1GB default)
+	fcHighPriorityWeight      = "FC_HIGH_PRIORITY_WEIGHT"       // dispatch weight for high priority (default: 10.0)
+	fcDefaultPriorityWeight   = "FC_DEFAULT_PRIORITY_WEIGHT"    // dispatch weight for default priority (default: 1.0)
 )
 
-// TODO: this is hardcoded for POC only. This needs to be hooked up to our text-based config story.
+// flowControlConfig is the base config, overridden by env vars via applyFlowControlEnvOverrides
 var flowControlConfig = flowcontrol.Config{
 	Controller: fccontroller.Config{}, // Use all defaults.
 	Registry: fcregistry.Config{
-		// Define domain of accepted priority levels as this field is required. Use defaults for all optional fields.
-		// TODO: this should not be hardcoded.
 		PriorityBands: []fcregistry.PriorityBandConfig{
-			{Priority: 10, PriorityName: "High", InterFlowDispatchPolicy: "VTC"}, // unbounded (defaults to 1GB)
-			{Priority: 0, PriorityName: "Default", InterFlowDispatchPolicy: "VTC", MaxBytes: 2_000}, // 2KB (~5 reqs @ 400B)
+			{Priority: 10, PriorityName: "High", InterFlowDispatchPolicy: "VTC"},    // defaults to 1GB
+			{Priority: 0, PriorityName: "Default", InterFlowDispatchPolicy: "VTC"},  // defaults to 1GB
 		},
-		// Configure inter-priority weights: High gets 10x the dispatch opportunities of Default
 		InterPriorityDispatchPolicyParams: []byte(`{"weights": {"10": 10.0, "0": 1.0}}`),
 	},
+}
+
+// applyFlowControlEnvOverrides reads env vars and applies overrides to flowControlConfig
+func applyFlowControlEnvOverrides(logger logr.Logger) {
+	highMaxBytes := env.GetEnvInt(fcHighPriorityMaxBytes, 0, logger)
+	defaultMaxBytes := env.GetEnvInt(fcDefaultPriorityMaxBytes, 0, logger)
+	highWeight := env.GetEnvFloat(fcHighPriorityWeight, 10.0, logger)
+	defaultWeight := env.GetEnvFloat(fcDefaultPriorityWeight, 1.0, logger)
+
+	// apply MaxBytes overrides (0 means use default 1GB)
+	if highMaxBytes > 0 {
+		flowControlConfig.Registry.PriorityBands[0].MaxBytes = uint64(highMaxBytes)
+	}
+	if defaultMaxBytes > 0 {
+		flowControlConfig.Registry.PriorityBands[1].MaxBytes = uint64(defaultMaxBytes)
+	}
+
+	// apply weight overrides via JSON config
+	weightsJSON := fmt.Sprintf(`{"weights": {"10": %.1f, "0": %.1f}}`, highWeight, defaultWeight)
+	flowControlConfig.Registry.InterPriorityDispatchPolicyParams = []byte(weightsJSON)
+
+	logger.Info("Flow control config applied",
+		"highMaxBytes", flowControlConfig.Registry.PriorityBands[0].MaxBytes,
+		"defaultMaxBytes", flowControlConfig.Registry.PriorityBands[1].MaxBytes,
+		"highWeight", highWeight,
+		"defaultWeight", defaultWeight)
 }
 
 var (
@@ -328,6 +357,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	var admissionController requestcontrol.AdmissionController
 	if enableFlowControl {
 		setupLog.Info("Initializing experimental Flow Control layer")
+		applyFlowControlEnvOverrides(setupLog)
 		fcCfg, err := flowControlConfig.ValidateAndApplyDefaults()
 		if err != nil {
 			setupLog.Error(err, "failed to initialize Flow Control layer")
