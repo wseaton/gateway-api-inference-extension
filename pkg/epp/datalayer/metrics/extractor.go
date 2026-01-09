@@ -193,6 +193,7 @@ func populateCacheInfoMetrics(clone *datalayer.Metrics, metric *dto.Metric, errs
 			}
 		}
 	}
+	clone.KvCacheMaxTokenCapacity = clone.CacheNumGPUBlocks * clone.CacheBlockSize
 }
 
 // addAdapters splits a comma-separated adapter list and stores keys with default value 0.
